@@ -1,0 +1,24 @@
+{
+  "name": "beatclip",
+  "version": "1.0.0",
+  "private": true,
+  "description": "BeatClip - Offline Musik Player mit Schnittfunktion (PWA + native Android-/iOS-Pakete via Capacitor)",
+  "scripts": {
+    "icons": "node tools/make_icons.js",
+    "assets:android": "node tools/make_android_assets.js && node tools/make_icons.js",
+    "assets:ios": "node tools/make_ios_assets.js",
+    "testwav": "node tools/make_test_wavs.js",
+    "sync": "npx cap sync android",
+    "sync:ios": "npx cap sync ios",
+    "apk:debug": "npx cap sync android && cd android && gradlew.bat assembleDebug && cd .. && node tools/publish_android_apk.js debug",
+    "apk:release": "npx cap sync android && cd android && gradlew.bat assembleRelease && cd .. && node tools/publish_android_apk.js release",
+    "ios:open": "npx cap sync ios && npx cap open ios"
+  },
+  "devDependencies": {
+    "@capacitor/android": "^6.2.0",
+    "@capacitor/cli": "^6.2.2",
+    "@capacitor/core": "^6.2.0",
+    "@capacitor/ios": "^6.2.2",
+    "beatclip-media": "file:plugins/beatclip-media"
+  }
+}

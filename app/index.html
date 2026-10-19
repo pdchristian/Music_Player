@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+<title>BeatClip – Offline Musik Player</title>
+<meta name="description" content="Offline-Musikplayer mit Schnittfunktion: Start/Ende je Playlist-Titel.">
+<meta name="theme-color" content="#00b8a9">
+
+<!-- iOS / iPadOS -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="BeatClip">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+
+<!-- PWA -->
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png" type="image/png">
+
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+
+  <!-- App-Leiste -->
+  <header class="appbar" id="appbar">
+    <div class="abRow">
+      <button class="iconBtn ghost" id="btnBack" data-act="back" hidden>←</button>
+      <div class="abTitle">
+        <h1 id="abTitle">BeatClip</h1>
+        <div class="abSub" id="abSub">Offline-Player mit Schnittfunktion</div>
+      </div>
+      <button class="iconBtn ghost" id="btnInstall" data-act="install" title="App installieren" hidden>⤓</button>
+      <button class="iconBtn ghost" data-act="theme" id="btnTheme" title="Hell/Dunkel">🌙</button>
+    </div>
+    <div class="abMeta">
+      <span id="abFolder" class="mono">📁 0 Titel</span>
+      <span class="spacer"></span>
+      <span class="pill pillBt" id="pillBt" title="Bluetooth-Audioausgabe">🔊 <span id="btLabel">Lautsprecher</span></span>
+    </div>
+  </header>
+
+  <!-- Screens -->
+  <main class="screens">
+    <section class="screen active" id="s-home"></section>
+    <section class="screen" id="s-playlists"></section>
+    <section class="screen" id="s-pl"></section>
+    <section class="screen" id="s-library"></section>
+    <section class="screen" id="s-set"></section>
+    <section class="screen" id="s-player"></section>
+    <section class="screen" id="s-about"></section>
+  </main>
+
+  <!-- Mini-Player -->
+  <div class="mini" id="mini" hidden>
+    <div class="miniTop" data-act="go-player">
+      <div class="miniCover" id="miniCover">🎵</div>
+      <div class="miniInfo">
+        <div class="t" id="miniTitle">–</div>
+        <div class="s" id="miniSub">–</div>
+      </div>
+      <button class="miniPlay" id="miniPlay" data-act="toggle-play" aria-label="Wiedergabe">▶</button>
+    </div>
+    <div class="miniBar"><i id="miniBarFill"></i></div>
+  </div>
+
+  <!-- Bottom-Navigation -->
+  <nav class="bottomnav">
+    <button class="nav active" data-nav="home"><span class="i">🏠</span><span>Start</span></button>
+    <button class="nav" data-nav="playlists"><span class="i">🎶</span><span>Playlists</span></button>
+    <span class="fabSlot"><button class="fab" data-act="fab-cut" title="Schnitt setzen" aria-label="Schnitt setzen">✂</button></span>
+    <button class="nav" data-nav="library"><span class="i">📁</span><span>Bibliothek</span></button>
+    <button class="nav" data-nav="set"><span class="i">⚙️</span><span>Einstell.</span></button>
+  </nav>
+
+  <!-- Overlay / Bottom-Sheet / Toast -->
+  <div class="overlay" id="overlay"></div>
+  <div class="sheet" id="sheet"></div>
+  <div class="toast" id="toast" role="status"></div>
+
+  <!-- Datei-Import -->
+  <input type="file" id="filePick" accept="audio/*,.mp3,.m4a,.aac,.ogg,.opus,.wav,.flac,.webm" multiple hidden>
+
+  <!-- Wiedergabe-Engine (ein MediaElement = beste Bluetooth-/Sperrbildschirm-Routing-Kompatibilität) -->
+  <audio id="audio" preload="auto"></audio>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

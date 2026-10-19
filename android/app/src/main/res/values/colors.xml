@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- BeatClip Markenfarben -->
+    <color name="colorPrimary">#00b8a9</color>
+    <color name="colorPrimaryDark">#0e7490</color>
+    <color name="colorAccent">#22d3ee</color>
+    <color name="backgroundColor">#0f1115</color>
+</resources>

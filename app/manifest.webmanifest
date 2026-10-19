@@ -1,0 +1,30 @@
+{
+  "name": "BeatClip – Offline Musik Player",
+  "short_name": "BeatClip",
+  "description": "Offline-Musikplayer für lokal gespeicherte Audiodateien. Jeder Playlist-Titel hat eigene Start- und Endmarken (Schnittfunktion).",
+  "id": "de.musicplayer.beatclip",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0f1115",
+  "theme_color": "#00b8a9",
+  "lang": "de",
+  "dir": "ltr",
+  "categories": ["music", "entertainment"],
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "file_handlers": [
+    {
+      "action": "./index.html",
+      "accept": { "audio/*": [".mp3", ".m4a", ".aac", ".ogg", ".opus", ".wav", ".flac"] }
+    }
+  ],
+  "shortcuts": [
+    { "name": "Playlists öffnen", "short_name": "Playlists", "url": "./index.html#playlists", "icons": [ { "src": "icons/icon-192.png", "sizes": "192x192" } ] },
+    { "name": "Bibliothek", "short_name": "Bibliothek", "url": "./index.html#library", "icons": [ { "src": "icons/icon-192.png", "sizes": "192x192" } ] }
+  ]
+}

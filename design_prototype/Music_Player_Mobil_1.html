@@ -1,0 +1,1171 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BeatClip – Offline-Musik Player Mobil v1 · Interaktiver Prototyp</title>
+<!--
+  ============================================================================
+  BeatClip v1 – INTERAKTIVER HTML-Prototyp (Simulation im Browser, kein Build)
+  ----------------------------------------------------------------------------
+  Konzept: Mobile App für lokal heruntergeladene Audiodateien.
+  Kernidee: Jeder Titel in einer Playlist hat eigene CUT-PUNKTE (Start/Ende).
+  Abgespielt wird nur der Abschnitt dazwischen – das Lied läuft nie komplett,
+  sofern ein Schnitt gesetzt ist.
+
+  Navigation (4 Bereiche + zentrale Aktion):
+    1 ▸ START       Cockpit: „Läuft gerade“, letzte Playlists, zuletzt gespielt
+    2 ▸ PLAYLISTEN  Playlists mit Titelanzahl + „geschnitten“-Badge, Drill-in
+    3 ▸ BIBLIOTHEK  Alle lokalen Dateien (Suche, Import, Format/Größe)
+    4 ▸ EINSTELL.  Wiedergabe, Ordner, Sleep-Timer, Hell/Dunkel
+    ✂ FAB          „Schnitt setzen“ – öffnet den Schnitt-Editor für den
+                   aktuellen Titel ( alternativ ✂ pro Playlistenzeile )
+    Player         Vollbild-Drill-in (← zurück) mit Timeline + Cut-Anzeige
+    Schnitt-Editor Bottom-Sheet mit WAVEFORM und zwei ziehbaren Griffen
+                   (Start/Ende), Feinjustage ±1 s, Reset, Vorschau
+
+  Interaktion im Prototyp: Play/Pause, Auto-Nächstertitel beim Erreichen der
+  Endmarke, seek per Klick auf Timeline/Waveform, Griffe ziehen (Pointer),
+  Playlist-Toggle (geschnitten an/aus), Toast, Bottom-Sheets, Dark/Light.
+
+  Look & Feel folgt: C:\Python\WOL\design_prototype\Android_50.html und
+                     C:\Python\Copilot_Chat\design_prototype\Mobile_Chat_51.html
+  (gleiche Farbtokens DARK/LIGHT, Phone-Frame, Panels/Zeilen, Pills, Sheets,
+  Toast, Bottom-Nav mit FAB, Event-Delegation über data-act)
+
+  Öffnen: direkt im Browser (F12 → Handy-Emulation empfohlen).
+  ============================================================================
+-->
+<style>
+  :root{
+    --bg:#0f1115; --surface:#1a1d24; --surface-hover:#232733; --border:#2c303a;
+    --text:#e6e8ee; --text-dim:#9aa0ab; --accent:#00b8a9; --accent-dark:#006b63;
+    --accent-text:#032019; --grad:linear-gradient(135deg,#00b8a9 0%,#0e7490 100%);
+    --online:#22c55e; --offline:#ef4444; --unknown:#f59e0b; --danger:#e0485a;
+    --blue:#60a5fa; --purple:#a78bfa; --shadow:0 10px 26px rgba(0,0,0,.45);
+    --wave-out:#3a4150; --wave-in:#00b8a9;
+  }
+  .phone[data-theme="light"]{
+    --bg:#f2f4f7; --surface:#ffffff; --surface-hover:#eef0f4; --border:#d8dbe2;
+    --text:#1b1e24; --text-dim:#5b6270; --accent:#009688; --accent-dark:#00695f;
+    --accent-text:#ffffff; --grad:linear-gradient(135deg,#00b8a9 0%,#00695f 100%);
+    --online:#16a34a; --offline:#dc2626; --unknown:#d97706; --danger:#dc2637;
+    --blue:#2563eb; --purple:#7c3aed; --shadow:0 8px 20px rgba(20,25,40,.10);
+    --wave-out:#d3d7df; --wave-in:#009688;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;font-family:"Segoe UI",system-ui,sans-serif}
+  body{background:#000;display:flex;align-items:center;justify-content:center;
+    min-height:100vh;padding:16px;overflow:auto}
+  .phone{position:relative;width:392px;height:820px;background:var(--bg);color:var(--text);
+    display:flex;flex-direction:column;overflow:hidden;border:2px solid #333;border-radius:36px}
+  .statusbar{display:flex;justify-content:space-between;padding:10px 22px 4px;
+    font-size:12px;color:var(--text-dim);flex-shrink:0}
+
+  /* ── Screens ─────────────────────────────────────────────────────────── */
+  .screen{flex:1;overflow-y:auto;padding:0 0 104px;display:none;animation:fade .18s}
+  .screen.active{display:block}
+  @keyframes fade{from{opacity:0;transform:translateY(6px)}to{opacity:1}}
+  .pad{padding:0 16px}
+
+  /* ── App-Kopf: Gradient-Band ─────────────────────────────────────────── */
+  .appbar{background:var(--grad);color:#fff;padding:14px 16px 18px;border-radius:0 0 22px 22px;
+    margin-bottom:14px;box-shadow:var(--shadow)}
+  .appbar .row1{display:flex;align-items:center;gap:10px}
+  .appbar h1{font-size:20px;font-weight:700;letter-spacing:.2px;flex:1}
+  .appbar .sub{font-size:12px;opacity:.9;margin-top:3px}
+  .ghostBtn{width:34px;height:34px;border-radius:10px;border:1px solid rgba(255,255,255,.35);
+    background:rgba(255,255,255,.14);color:#fff;font-size:15px;cursor:pointer;flex-shrink:0;
+    display:inline-flex;align-items:center;justify-content:center;position:relative}
+  .ghostBtn:active{background:rgba(255,255,255,.3)}
+  .backBtn{width:34px;height:34px;border-radius:10px;border:none;background:rgba(255,255,255,.16);
+    color:#fff;font-size:16px;cursor:pointer;flex-shrink:0;display:inline-flex;align-items:center;
+    justify-content:center}
+  .backBtn:active{background:rgba(255,255,255,.32)}
+
+  .pageTitle{font-size:20px;font-weight:700}
+  .pageSub{color:var(--text-dim);font-size:12px;margin-top:2px}
+  .sectionHeading{font-size:12px;font-weight:700;color:var(--text-dim);margin:16px 0 8px;
+    letter-spacing:.8px;text-transform:uppercase;display:flex;align-items:center;gap:8px}
+  .sectionHeading .line{flex:1;height:1px;background:var(--border)}
+  .mono{font-family:Consolas,monospace;font-size:12px;color:var(--text-dim)}
+  .toprow{display:flex;justify-content:space-between;align-items:flex-start;gap:8px}
+
+  /* ── Buttons ─────────────────────────────────────────────────────────── */
+  .btn{border:1px solid var(--border);border-radius:11px;padding:11px 13px;font-size:13px;
+    font-weight:600;background:var(--surface);color:var(--text);cursor:pointer;text-align:center}
+  .btn:disabled{opacity:.45;cursor:default}
+  .btn.primary{background:var(--accent);color:var(--accent-text);border:none}
+  .btn.primary:active{background:var(--accent-dark)}
+  .btn.danger{background:rgba(224,72,90,.12);color:var(--danger);border-color:rgba(224,72,90,.4)}
+  .btn.small{padding:7px 10px;font-size:12px;border-radius:10px}
+  .btn.block{width:100%}
+  .iconBtn{width:36px;height:36px;flex-shrink:0;border:1px solid var(--border);border-radius:10px;
+    background:var(--surface);color:var(--text);font-size:15px;cursor:pointer;display:inline-flex;
+    align-items:center;justify-content:center}
+  .iconBtn:active{border-color:var(--accent);color:var(--accent)}
+  .btnrow{display:flex;gap:8px;margin:12px 0}
+  .btnrow .btn{flex:1}
+  .spacer{flex:1}
+
+  /* ── Pills / Chips / Badges ──────────────────────────────────────────── */
+  .pill{font-size:10px;font-weight:700;border-radius:999px;padding:3px 9px;flex-shrink:0;
+    display:inline-flex;align-items:center;gap:4px}
+  .pillCut{background:rgba(167,139,250,.16);color:var(--purple)}
+  .pillFull{background:var(--surface-hover);color:var(--text-dim)}
+  .pillOn{background:rgba(34,197,94,.15);color:var(--online)}
+  .pillOff{background:rgba(239,68,68,.15);color:var(--offline)}
+  .chip{display:inline-flex;gap:5px;align-items:center;border-radius:999px;padding:4px 10px;
+    font-size:11px;font-weight:600;background:var(--surface-hover);color:var(--text-dim);
+    border:1px solid transparent;cursor:pointer}
+  .chip.on{background:rgba(0,184,169,.16);color:var(--accent);border-color:rgba(0,184,169,.45)}
+  .chipRow{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0 12px}
+  .dot{width:9px;height:9px;border-radius:50%;display:inline-block;flex-shrink:0}
+  .dotPlay{background:var(--accent);box-shadow:0 0 8px var(--accent);animation:blink 1.2s infinite}
+  @keyframes blink{50%{opacity:.35}}
+
+  /* ── Panels / Zeilen ─────────────────────────────────────────────────── */
+  .panel{background:var(--surface);border:1px solid var(--border);border-radius:14px;overflow:hidden}
+  .row64{display:flex;align-items:center;gap:12px;min-height:64px;padding:10px 14px}
+  .sep{height:1px;background:var(--border)}
+  .rowTitle{font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .rowSub{font-size:11.5px;color:var(--text-dim);margin-top:2px;white-space:nowrap;overflow:hidden;
+    text-overflow:ellipsis}
+  .rowInfo{flex:1;min-width:0}
+  .rowRight{display:flex;align-items:center;gap:8px;flex-shrink:0}
+  .num{width:26px;text-align:center;font-family:Consolas,monospace;font-size:12px;color:var(--text-dim);flex-shrink:0}
+
+  /* Playlist-Karten (2 Spalten) */
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:14px;
+    cursor:pointer;position:relative}
+  .card:active{border-color:var(--accent)}
+  .card .cover{height:64px;border-radius:10px;background:var(--grad);display:flex;align-items:center;
+    justify-content:center;font-size:26px;color:#fff;margin-bottom:10px}
+  .card .name{font-size:14px;font-weight:600}
+  .card .meta{font-size:11px;color:var(--text-dim);margin-top:3px}
+
+  /* ── Mini-Player über der Navigation ─────────────────────────────────── */
+  .mini{flex-shrink:0;background:var(--surface);border-top:1px solid var(--border);
+    padding:9px 14px 10px;z-index:31;cursor:pointer}
+  .miniTop{display:flex;align-items:center;gap:10px}
+  .miniCover{width:40px;height:40px;border-radius:10px;background:var(--grad);display:flex;
+    align-items:center;justify-content:center;font-size:18px;color:#fff;flex-shrink:0}
+  .miniInfo{flex:1;min-width:0}
+  .miniInfo .t{font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .miniInfo .s{font-size:10.5px;color:var(--text-dim);white-space:nowrap;overflow:hidden;
+    text-overflow:ellipsis;margin-top:1px}
+  .miniPlay{width:38px;height:38px;border-radius:50%;border:none;background:var(--accent);
+    color:var(--accent-text);font-size:15px;cursor:pointer;flex-shrink:0;display:inline-flex;
+    align-items:center;justify-content:center}
+  .miniPlay:active{background:var(--accent-dark)}
+  .miniBar{height:3px;border-radius:3px;background:var(--surface-hover);margin-top:8px;overflow:hidden}
+  .miniBar i{display:block;height:100%;background:var(--accent);width:0}
+
+  /* ── Bottom-Nav (4 + FAB ✂) ──────────────────────────────────────────── */
+  .bottomnav{display:flex;align-items:center;background:var(--surface);border-top:1px solid var(--border);
+    padding:8px 4px 18px;z-index:30;position:relative}
+  .nav{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;background:none;
+    border:none;color:var(--text-dim);font-size:9px;cursor:pointer;padding:6px 0;position:relative}
+  .nav .i{font-size:19px}
+  .nav.active{color:var(--accent);font-weight:700}
+  .fabSlot{width:64px;flex-shrink:0;display:flex;justify-content:center}
+  .fab{width:52px;height:52px;border-radius:18px;border:none;background:var(--grad);color:#fff;
+    font-size:22px;cursor:pointer;box-shadow:0 6px 18px rgba(0,184,169,.45);margin-top:-26px;
+    display:flex;align-items:center;justify-content:center}
+  .fab:active{transform:scale(.94)}
+
+  /* ── Sheet / Overlay / Toast ─────────────────────────────────────────── */
+  .overlay{position:absolute;inset:0;background:rgba(0,0,0,.55);display:none;z-index:40}
+  .overlay.open{display:block}
+  .sheet{position:absolute;left:0;right:0;bottom:0;background:var(--surface);border-radius:24px 24px 0 0;
+    padding:18px 18px 26px;max-height:86%;overflow-y:auto;transform:translateY(105%);
+    transition:transform .22s ease;z-index:50;border-top:1px solid var(--border)}
+  .sheet.open{transform:translateY(0)}
+  .sheet:not(.open){visibility:hidden}
+  .sheet h2{font-size:17px;margin-bottom:4px}
+  .sheet .sub{font-size:12px;color:var(--text-dim);margin-bottom:14px}
+  .grab{width:40px;height:4px;border-radius:2px;background:var(--border);margin:0 auto 14px}
+  .sheetbtns{display:flex;gap:10px;margin-top:16px}
+  .sheetbtns .btn{flex:1}
+  .menuitem{display:flex;align-items:center;gap:11px;padding:14px 4px;font-size:14px;cursor:pointer;
+    border-bottom:1px solid var(--border)}
+  .menuitem:last-of-type{border-bottom:none}
+  .menuitem.dngr{color:var(--danger)}
+  .toast{position:absolute;left:16px;right:16px;bottom:170px;background:var(--surface-hover);
+    color:var(--text);border:1px solid var(--border);border-radius:13px;padding:12px 14px;font-size:13px;
+    z-index:60;opacity:0;pointer-events:none;transition:opacity .2s;box-shadow:var(--shadow)}
+  .toast.show{opacity:1}
+  .toast.err{border-color:var(--danger)}
+
+  /* ── Suche / Inputs / Toggles ────────────────────────────────────────── */
+  .search{display:flex;gap:8px;align-items:center;background:var(--surface);
+    border:1px solid var(--border);border-radius:10px;padding:9px 12px;margin-bottom:10px}
+  .search input{background:none;border:none;outline:none;color:var(--text);flex:1;font-size:13px}
+  .toggle{width:44px;height:26px;border-radius:999px;background:var(--surface-hover);border:1px solid var(--border);
+    position:relative;cursor:pointer;flex-shrink:0;transition:background .15s}
+  .toggle::after{content:"";position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;
+    background:var(--text-dim);transition:all .15s}
+  .toggle.on{background:var(--accent);border-color:var(--accent)}
+  .toggle.on::after{left:21px;background:var(--accent-text)}
+  .kv{display:flex;justify-content:space-between;gap:10px;padding:11px 14px;font-size:13px;align-items:center}
+  .kv .k{color:var(--text)}
+  .kv .v{font-family:Consolas,monospace;font-size:11.5px;text-align:right;color:var(--text-dim)}
+
+  /* ── Waveform + Schnitt-Editor ───────────────────────────────────────── */
+  .waveWrap{position:relative;height:96px;border-radius:12px;background:var(--console-bg,#12141a);
+    background:var(--bg);border:1px solid var(--border);overflow:hidden;touch-action:none;
+    user-select:none;-webkit-user-select:none;cursor:crosshair}
+  .waveWrap canvas{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+  .playhead{position:absolute;top:0;bottom:0;width:2px;background:var(--text);z-index:6;pointer-events:none}
+  .playhead::after{content:"";position:absolute;top:-1px;left:-4px;border:5px solid transparent;
+    border-top-color:var(--text)}
+  .handle{position:absolute;top:0;bottom:0;width:30px;transform:translateX(-15px);z-index:7;
+    cursor:ew-resize;touch-action:none;display:flex;align-items:flex-start;justify-content:center}
+  .handle i{display:block;width:3px;height:100%;background:var(--purple)}
+  .handle span{font-size:10px;font-weight:800;background:var(--purple);color:#fff;border-radius:6px;
+    padding:2px 5px;margin-top:2px}
+  .cutInfo{display:flex;gap:8px;margin-top:10px;align-items:stretch}
+  .cutBox{flex:1;background:var(--bg);border:1px solid var(--border);border-radius:11px;padding:9px 10px;
+    text-align:center}
+  .cutBox .lbl{font-size:10px;font-weight:700;letter-spacing:.6px;color:var(--text-dim);text-transform:uppercase}
+  .cutBox .val{font-family:Consolas,monospace;font-size:17px;font-weight:700;margin-top:3px}
+  .cutBox.start .val{color:var(--purple)}
+  .cutBox.end .val{color:var(--accent)}
+  .cutBox.dur .val{color:var(--text)}
+  .nudge{display:flex;gap:6px;justify-content:center;margin-top:8px}
+  .nudge button{border:1px solid var(--border);background:var(--surface);color:var(--text);
+    border-radius:9px;padding:7px 12px;font-size:12px;font-weight:700;cursor:pointer}
+  .nudge button:active{border-color:var(--accent);color:var(--accent)}
+
+  /* ── Player-Vollbild ─────────────────────────────────────────────────── */
+  .playerHead{display:flex;align-items:center;gap:10px;padding:12px 16px 2px}
+  .artWrap{margin:14px auto 4px;width:250px;height:250px;border-radius:22px;background:var(--grad);
+    display:flex;align-items:center;justify-content:center;font-size:88px;color:#fff;
+    box-shadow:var(--shadow);position:relative}
+  .artWrap .cutTag{position:absolute;bottom:12px;left:12px;background:rgba(0,0,0,.45);color:#fff;
+    font-size:11px;font-weight:700;border-radius:999px;padding:5px 11px}
+  .pTitle{font-size:19px;font-weight:700;text-align:center;margin-top:16px;padding:0 16px}
+  .pArtist{font-size:12.5px;color:var(--text-dim);text-align:center;margin-top:3px}
+  .pTimeline{position:relative;height:44px;margin:16px 16px 0;border-radius:10px;background:var(--surface);
+    border:1px solid var(--border);overflow:hidden;touch-action:none;cursor:grab}
+  .pTimeline canvas{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+  .pTimes{display:flex;justify-content:space-between;font-family:Consolas,monospace;font-size:11px;
+    color:var(--text-dim);margin:6px 16px 0}
+  .pControls{display:flex;align-items:center;justify-content:center;gap:18px;margin-top:14px}
+  .ctlBtn{width:48px;height:48px;border-radius:16px;border:1px solid var(--border);background:var(--surface);
+    color:var(--text);font-size:19px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center}
+  .ctlBtn:active{border-color:var(--accent);color:var(--accent)}
+  .ctlBtn.big{width:68px;height:68px;border-radius:50%;border:none;background:var(--accent);
+    color:var(--accent-text);font-size:25px}
+  .ctlBtn.big:active{background:var(--accent-dark)}
+  .ctlBtn.on{border-color:var(--accent);color:var(--accent);background:rgba(0,184,169,.12)}
+  .skipRow{display:flex;gap:8px;margin:16px 16px 0}
+  .skipRow .btn{flex:1}
+  .volRow{display:flex;align-items:center;gap:10px;margin:16px 16px 0}
+  .volRow input[type=range]{flex:1;accent-color:var(--accent)}
+  .nextUp{margin:18px 16px 0}
+
+  /* ── About / leer ────────────────────────────────────────────────────── */
+  .aboutBlock{text-align:center;padding:20px 10px 6px}
+  .logoTile{width:82px;height:82px;border-radius:22px;margin:0 auto 12px;background:var(--grad);
+    display:flex;align-items:center;justify-content:center;font-size:38px;color:#fff;box-shadow:var(--shadow)}
+  .aboutTitle{font-size:21px;font-weight:700}
+  .aboutVer{color:var(--text-dim);font-size:11.5px;margin-top:3px}
+  .aboutText{color:var(--text-dim);font-size:12px;line-height:1.6;margin:10px auto 14px;max-width:300px}
+  .stepline{display:flex;gap:10px;padding:9px 0;font-size:12px;line-height:1.5;text-align:left}
+  .stepline .num{width:22px;height:22px;border-radius:50%;background:var(--accent);color:var(--accent-text);
+    font-size:11px;font-weight:800;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+  .empty{text-align:center;color:var(--text-dim);padding:36px 14px;font-size:13px;line-height:1.6}
+  .infoBlock{color:var(--text-dim);font-size:11.5px;line-height:1.6;padding:12px 14px;
+    border:1px dashed var(--border);border-radius:12px;margin-top:12px}
+  .progress{height:6px;border-radius:8px;background:var(--surface-hover);overflow:hidden;margin:10px 0}
+  .progress i{display:block;height:100%;width:0;background:var(--accent);transition:width .2s}
+</style>
+</head>
+<body>
+<div class="phone" id="phone" data-theme="dark">
+  <div class="statusbar"><span id="clock">09:41</span><span>📶 &nbsp;🔋 86 %</span></div>
+
+  <div class="screen active" id="s-home"></div>
+  <div class="screen" id="s-playlists"></div>
+  <div class="screen" id="s-pl"></div>
+  <div class="screen" id="s-library"></div>
+  <div class="screen" id="s-set"></div>
+  <div class="screen" id="s-player"></div>
+  <div class="screen" id="s-about"></div>
+
+  <!-- Mini-Player (erscheint nur bei aktiver Wiedergabe) -->
+  <div class="mini" id="mini" style="display:none" data-act="go-player">
+    <div class="miniTop">
+      <div class="miniCover" id="miniCover">🎵</div>
+      <div class="miniInfo">
+        <div class="t" id="miniTitle">–</div>
+        <div class="s" id="miniSub">–</div>
+      </div>
+      <button class="miniPlay" id="miniPlay" data-act="toggle-play">▶</button>
+    </div>
+    <div class="miniBar"><i id="miniBarFill"></i></div>
+  </div>
+
+  <!-- 4 Bereiche + zentrale Aktion „Schnitt setzen“ -->
+  <div class="bottomnav">
+    <button class="nav active" data-nav="home"><span class="i">🏠</span><span>Start</span></button>
+    <button class="nav" data-nav="playlists"><span class="i">🎶</span><span>Playlists</span></button>
+    <span class="fabSlot"><button class="fab" data-act="fab-cut" title="Schnitt setzen">✂</button></span>
+    <button class="nav" data-nav="library"><span class="i">📁</span><span>Bibliothek</span></button>
+    <button class="nav" data-nav="set"><span class="i">⚙️</span><span>Einstell.</span></button>
+  </div>
+
+  <div class="overlay" id="overlay"></div>
+  <div class="sheet" id="sheet"></div>
+  <div class="toast" id="toast"></div>
+</div>
+
+<script>
+"use strict";
+/* ══════════════════════════ Utils ════════════════════════════════════════ */
+const $  = s => document.querySelector(s);
+const $$ = s => Array.from(document.querySelectorAll(s));
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+const clamp = (v,a,b) => Math.max(a, Math.min(b, v));
+function mmss(sec, withHours){
+  sec = Math.max(0, Math.round(sec*10)/10);
+  const h = Math.floor(sec/3600), m = Math.floor((sec%3600)/60), s = Math.floor(sec%60);
+  const cs = Math.round((sec - Math.floor(sec))*10);
+  const base = h > 0 || withHours
+    ? `${h}:${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`
+    : `${m}:${String(s).padStart(2,"0")}`;
+  return base;
+}
+function mmssPrecise(sec){
+  sec = Math.max(0, sec);
+  const m = Math.floor(sec/60), s = Math.floor(sec%60), t = Math.round((sec%1)*10);
+  return `${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}.${t}`;
+}
+function clockStr(){ const d = new Date();
+  return String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0"); }
+function toast(msg, isErr){ const el = $("#toast"); el.textContent = msg;
+  el.classList.toggle("err", !!isErr); el.classList.add("show");
+  clearTimeout(el._tm); el._tm = setTimeout(() => el.classList.remove("show"), 2400); }
+function timeAgo(ts){ const s = Math.floor((Date.now()-ts)/1000);
+  if (s < 60) return "gerade eben"; if (s < 3600) return Math.floor(s/60)+" min";
+  if (s < 86400) return Math.floor(s/3600)+" h"; return Math.floor(s/86400)+" T"; }
+
+/* Deterministische Pseudozufalls-Waveform (identisch je Titel-ID) */
+function waveData(seedStr, n){
+  let h = 2166136261;
+  for (const c of seedStr) { h ^= c.charCodeAt(0); h = Math.imul(h, 16777619); }
+  const rnd = () => { h ^= h << 13; h ^= h >>> 17; h ^= h << 5; h >>>= 0; return h / 4294967296; };
+  const out = [];
+  let v = .45;
+  for (let i = 0; i < n; i++){
+    v = clamp(v + (rnd()-.5)*.34, .07, 1);
+    const beat = (i % 12 < 2) ? .14 : 0;
+    out.push(clamp(v + beat, .05, 1));
+  }
+  return out;
+}
+
+/* ══════════════════════════ Daten (simulierte lokale Bibliothek) ═════════ */
+/* cuts:{start,end}|null  → null = kompletter Titel */
+const state = {
+  screen:"home", stack:[], theme:"dark",
+  ui:{ libQ:"", plSort:"title", drag:null, editTrack:null, importPct:0, importing:false },
+  settings:{ fade:1.0, gapless:true, repeat:"all", shuffle:false, sleepMin:0,
+             folder:"Download/Musik", formats:"mp3, m4a, flac, ogg", wifiOnly:true },
+  playQueue:[],            /* Track-IDs der aktiven Wiedergabeliste */
+  qIndex:0,
+  player:{ trackId:null, pos:0, playing:false },
+  playlists:[
+    { id:"pl1", name:"Morgen-Früh", cover:"☀️", items:[
+      { id:"t1",  cut:{ start:0,   end:101 } },
+      { id:"t4",  cut:null },
+      { id:"t8",  cut:{ start:40,  end:98 } },
+    ]},
+    { id:"pl2", name:"Chill & Fokus", cover:"🎧", items:[
+      { id:"t2",  cut:{ start:12,  end:74 } },
+      { id:"t6",  cut:{ start:225, end:300 } },
+      { id:"t9",  cut:null },
+      { id:"t5",  cut:{ start:160, end:244 } },
+    ]},
+    { id:"pl3", name:"Partyschnipsel", cover:"🎉", items:[
+      { id:"t3",  cut:{ start:58,  end:96 } },
+      { id:"t7",  cut:{ start:35,  end:82 } },
+      { id:"t10", cut:{ start:50,  end:115 } },
+    ]},
+    { id:"pl4", name:"Alle Titel", cover:"🗂️", items:[] },
+  ],
+  tracks:[
+    { id:"t1",  title:"Sunrise Avenue",     artist:"Aurora Lane",   album:"Morning Light",   dur:212, fmt:"mp3",  kb:8_200, icon:"🌅", added:Date.now()-2*86400e3 },
+    { id:"t2",  title:"Deep Focus",         artist:"Kaveh",         album:"Flow States",     dur:301, fmt:"flac", kb:31_400, icon:"🧠", added:Date.now()-5*86400e3 },
+    { id:"t3",  title:"Neon Nights",        artist:"The Voltz",     album:"Voltage",         dur:198, fmt:"mp3",  kb:7_700, icon:"🌃", added:Date.now()-9*86400e3 },
+    { id:"t4",  title:"Regen auf Blech",    artist:"Marta Klang",   album:"Zwischenstadt",   dur:244, fmt:"m4a",  kb:5_900, icon:"🌧️", added:Date.now()-1*86400e3 },
+    { id:"t5",  title:"Treibsand",          artist:"Flussaufwärts", album:"Kilometerweit",   dur:329, fmt:"mp3",  kb:12_600, icon:"🏜️", added:Date.now()-14*86400e3 },
+    { id:"t6",  title:"Blue Hour",          artist:"Nordlicht",     album:"Polarnacht",      dur:377, fmt:"ogg",  kb:9_900, icon:"🌌", added:Date.now()-21*86400e3 },
+    { id:"t7",  title:"Kaffeemaschine",     artist:"Lo-Fi Büro",    album:"Homeoffice Vol.2", dur:149, fmt:"mp3", kb:5_800, icon:"☕", added:Date.now()-3*86400e3 },
+    { id:"t8",  title:"Zugverspätung",      artist:"Gleis Neun",    album:"Warten & Fahren", dur:289, fmt:"mp3",  kb:11_100, icon:"🚆", added:Date.now()-7*86400e3 },
+    { id:"t9",  title:"Waldläufer",         artist:"Tannengrund",   album:"Moos & Nebel",    dur:262, fmt:"flac", kb:27_300, icon:"🌲", added:Date.now()-30*86400e3 },
+    { id:"t10", title:"Bassstraße 12",      artist:"DJ Hinterhof",  album:"Häuserecke",      dur:175, fmt:"mp3",  kb:6_700, icon:"🔊", added:Date.now()-4*86400e3 },
+  ],
+};
+/* „Alle Titel“-Playlist füllen */
+state.playlists.find(p => p.id === "pl4").items =
+  state.tracks.map(t => ({ id:t.id, cut:null }));
+
+/* ══════════════════════════ Helpers: Tracks & Schnitte ═══════════════════ */
+const track = id => state.tracks.find(t => t.id === id);
+const playlist = id => state.playlists.find(p => p.id === id);
+const itemOf = (plId, trackId) => playlist(plId)?.items.find(i => i.id === trackId);
+/* Cut des aktuell spielenden Titels (aus der aktiven Queue-Playlist) */
+function currentItem(){
+  if (!state.player.trackId) return null;
+  for (const pl of state.playlists){
+    const it = pl.items.find(i => i.id === state.player.trackId);
+    if (it) return { pl, it };
+  }
+  return null;
+}
+function activeCut(){ const c = currentItem(); return c ? c.it.cut : null; }
+/* Effektiver Abspielbereich */
+function span(){
+  const t = track(state.player.trackId); if (!t) return null;
+  const cut = activeCut();
+  const start = cut ? cut.start : 0;
+  const end   = cut ? Math.min(cut.end, t.dur) : t.dur;
+  return { start, end, dur:t.dur, len:end-start };
+}
+function cutBadge(it){
+  return it.cut
+    ? `<span class="pill pillCut">✂ ${mmss(it.cut.end - it.cut.start)} von ${mmss(track(it.id).dur)}</span>`
+    : `<span class="pill pillFull">ganz</span>`;
+}
+
+/* ══════════════════════════ Wiedergabe-Simulation ═══════════════════════ */
+let beat = 0;           /* Animations-Tick 200 ms = 1 s Musikzeit */
+function playTrack(trackId, plId){
+  const t = track(trackId); if (!t) return;
+  const pl = plId ? playlist(plId) : currentItem()?.pl;
+  let it = pl ? pl.items.find(i => i.id === trackId) : null;
+  if (!it){ /* Track ohne Playlist (Bibliothek) → temporärer Eintrag in „Alle Titel“ */
+    const all = playlist("pl4");
+    it = all.items.find(i => i.id === trackId);
+    pl = all;
+  }
+  if (!it) return;
+  state.playQueue = pl.items.map(i => i.id);
+  state.qIndex = state.playQueue.indexOf(trackId);
+  state.player.trackId = trackId;
+  const cut = it.cut;
+  state.player.pos = cut ? cut.start : 0;
+  state.player.playing = true;
+  renderMini(); refreshCurrent();
+  if (state.screen !== "player") toast(`▶ ${t.title} · ${it.cut ? `Schnitt ${mmssPrecise(cut.start)}–${mmssPrecise(cut.end)}` : "ganzer Titel"}`);
+}
+function togglePlay(){
+  if (!state.player.trackId){ playTrack(state.playlists[0].items[0].id, "pl1"); return; }
+  state.player.playing = !state.player.playing;
+  renderMini(); refreshCurrent();
+}
+function nextTrack(manual){
+  const q = state.playQueue; if (!q.length) return;
+  let idx = state.qIndex;
+  if (state.settings.shuffle){
+    idx = Math.floor(Math.random()*q.length);
+  } else idx++;
+  if (idx >= q.length){
+    if (state.settings.repeat === "one" && !manual){ state.player.pos = span().start; renderMini(); refreshCurrent(); return; }
+    idx = 0;
+  }
+  playTrack(q[idx]);
+}
+function prevTrack(){
+  if (span() && state.player.pos - span().start > 3){ state.player.pos = span().start; renderMini(); refreshCurrent(); return; }
+  let idx = state.qIndex - 1; if (idx < 0) idx = state.playQueue.length - 1;
+  playTrack(state.playQueue[idx]);
+}
+/* Haupttick: 200 ms real = 1.0 s Musik (damit der Prototyp flott durchläuft) */
+setInterval(() => {
+  if (!state.player.playing || !state.player.trackId) return;
+  beat++;
+  const s = span(); if (!s) return;
+  state.player.pos += 1.0;
+  if (state.player.pos >= s.end){
+    /* Ende des Schnitts erreicht → Übergang */
+    if (state.settings.repeat === "one"){ state.player.pos = s.start; }
+    else if (state.qIndex >= state.playQueue.length - 1 && state.settings.repeat === "off"){
+      state.player.playing = false; state.player.pos = s.end;
+      toast(`⏹ „${track(state.player.trackId).title}“ zu Ende (Schnitt)`);
+      renderMini(); refreshCurrent(); return;
+    } else {
+      const done = track(state.player.trackId).title;
+      nextTrack(false);
+      toast(`↦ „${done}“ fertig · Schnitt-Ende bei ${mmssPrecise(s.end)}`);
+      return;
+    }
+  }
+  renderMini();
+  if (state.screen === "player"){ drawPlayerTimeline(); updatePlayerText(); }
+  if ($("#sheet").classList.contains("open") && state.ui.editTrack === state.player.trackId){
+    drawSheetWave(); updateCutBoxes();
+  }
+}, 200);
+
+/* ══════════════════════════ Navigation ══════════════════════════════════ */
+const TABS = ["home","playlists","library","set"];
+function go(screen, push){
+  if (push !== false && screen !== state.screen) state.stack.push(state.screen);
+  state.screen = screen;
+  $$(".screen").forEach(s => s.classList.remove("active"));
+  $("#s-"+screen).classList.add("active");
+  $$(".nav").forEach(n => n.classList.toggle("active", n.dataset.nav === (TABS.includes(screen) ? screen : null)));
+  ({ home:renderHome, playlists:renderPlaylists, pl:renderPlDetail, library:renderLibrary,
+     set:renderSet, player:renderPlayer, about:renderAbout })[screen]();
+  $("#s-"+screen).scrollTop = 0;
+}
+function back(){ const prev = state.stack.pop() || "home"; go(prev, false); }
+$$(".nav").forEach(n => n.addEventListener("click", () => go(n.dataset.nav, false)));
+function refreshCurrent(){
+  ({ home:renderHome, playlists:renderPlaylists, pl:renderPlDetail, library:renderLibrary,
+     set:renderSet, player:renderPlayer, about:renderAbout })[state.screen]?.();
+}
+
+/* ══════════════════════════ Sheet / Dialoge ═════════════════════════════ */
+function openSheet(html){ $("#sheet").innerHTML = html; $("#sheet").classList.add("open");
+  $("#overlay").classList.add("open"); }
+function closeSheet(){ $("#sheet").classList.remove("open"); $("#overlay").classList.remove("open");
+  state.ui.editTrack = null; }
+$("#overlay").addEventListener("click", closeSheet);
+
+/* ══════════════════════════ Screen: START ═══════════════════════════════ */
+function renderHome(){
+  const cutCount = state.playlists.flatMap(p => p.items).filter(i => i.cut).length;
+  const recent = state.tracks.slice().sort((a,b) => b.added - a.added).slice(0,4);
+  let html = `
+  <div class="appbar">
+    <div class="row1">
+      <div style="flex:1"><h1>BeatClip</h1>
+      <div class="sub">${state.tracks.length} lokale Titel · ${cutCount} mit Schnitt</div></div>
+      <button class="ghostBtn" data-act="theme" title="Hell/Dunkel">${state.theme === "dark" ? "🌙" : "☀️"}</button>
+      <button class="ghostBtn" data-act="go-player" title="Player">🎧</button>
+    </div>
+    <div style="margin-top:12px;display:flex;gap:8px;align-items:center">
+      <span style="font-size:12px;font-weight:600;opacity:.95">📁 ${esc(state.settings.folder)}</span>
+      <span class="spacer" style="flex:1"></span>
+      <span class="pill" style="background:rgba(255,255,255,.18);color:#fff">offline verfügbar</span>
+    </div>
+  </div>
+  <div class="pad">`;
+
+  if (state.player.trackId){
+    const t = track(state.player.trackId), s = span(), it = currentItem()?.it;
+    html += `<div class="sectionHeading">Läuft gerade <span class="line"></span></div>
+    <div class="panel"><div class="row64" data-act="go-player">
+      <div class="miniCover">${t.icon}</div>
+      <div class="rowInfo"><div class="rowTitle">${esc(t.title)}</div>
+        <div class="rowSub">${esc(t.artist)} · ${it.cut ? `Schnitt ${mmssPrecise(s.start)}–${mmssPrecise(s.end)}` : "ganzer Titel"}</div></div>
+      <div class="rowRight"><span class="dot dotPlay"></span></div>
+    </div></div>`;
+  }
+
+  html += `<div class="sectionHeading">Playlists <span class="line"></span></div><div class="grid">`;
+  state.playlists.slice(0,4).forEach(pl => {
+    const cuts = pl.items.filter(i => i.cut).length;
+    html += `<div class="card" data-act="open-pl" data-pl="${pl.id}">
+      <div class="cover">${pl.cover}</div>
+      <div class="name">${esc(pl.name)}</div>
+      <div class="meta">${pl.items.length} Titel${cuts ? ` · ✂ ${cuts}` : ""}</div>
+    </div>`;
+  });
+  html += `</div>`;
+
+  html += `<div class="sectionHeading">Zuletzt hinzugefügt <span class="line"></span></div>
+  <div class="panel">`;
+  recent.forEach((t,i) => {
+    html += `${i ? '<div class="sep"></div>' : ""}<div class="row64">
+      <div class="miniCover">${t.icon}</div>
+      <div class="rowInfo"><div class="rowTitle">${esc(t.title)}</div>
+        <div class="rowSub">${esc(t.artist)} · ${mmss(t.dur)} · ${timeAgo(t.added)}</div></div>
+      <div class="rowRight">
+        <button class="iconBtn" data-act="play-track" data-t="${t.id}" title="Abspielen">▶</button>
+        <button class="iconBtn" data-act="edit-cut" data-t="${t.id}" title="Schnitt setzen">✂</button>
+      </div></div>`;
+  });
+  html += `</div>
+  <div class="infoBlock">💡 <b>Idee der App:</b> Jeder Playlist-Titel hat eigene
+  <b>Start-</b> und <b>Endmarken</b>. Abgespielt wird nur der Abschnitt dazwischen –
+  ideal für Refrains, Hook-Schleifen oder kurze Häppchen unterwegs.
+  Tippen Sie auf <b>✂</b> oder den großen <b>✂-Button</b> unten.</div></div>`;
+  $("#s-home").innerHTML = html;
+}
+
+/* ══════════════════════════ Screen: PLAYLISTEN ══════════════════════════ */
+function renderPlaylists(){
+  let html = `<div class="pad" style="padding-top:16px">
+  <div class="toprow"><div><div class="pageTitle">Playlists</div>
+    <div class="pageSub">${state.playlists.length} Listen · ${state.playlists.flatMap(p=>p.items).length} Einträge</div></div>
+    <button class="btn small primary" data-act="new-pl">+ Neue Playlist</button></div>
+  <div class="sectionHeading">Alle Playlists <span class="line"></span></div><div class="panel">`;
+  state.playlists.forEach((pl,i) => {
+    const cuts = pl.items.filter(x => x.cut).length;
+    const total = pl.items.reduce((a,x) => a + (x.cut ? x.cut.end-x.cut.start : track(x.id).dur), 0);
+    html += `${i ? '<div class="sep"></div>' : ""}<div class="row64" data-act="open-pl" data-pl="${pl.id}">
+      <div class="miniCover">${pl.cover}</div>
+      <div class="rowInfo"><div class="rowTitle">${esc(pl.name)}</div>
+        <div class="rowSub">${pl.items.length} Titel · ${mmss(total)} · ✂ ${cuts} geschnitten</div></div>
+      <div class="rowRight">
+        <button class="iconBtn" data-act="play-pl" data-pl="${pl.id}" title="Playlist abspielen">▶</button><span>›</span>
+      </div></div>`;
+  });
+  html += `</div></div>`;
+  $("#s-playlists").innerHTML = html;
+}
+
+/* ══════════════════════════ Screen: PLAYLIST-DETAIL ═════════════════════ */
+function renderPlDetail(){
+  const pl = playlist(state.ui.activePl || "pl1");
+  state.ui.activePl = pl.id;
+  let html = `<div class="pad" style="padding-top:14px">
+  <div class="toprow">
+    <button class="iconBtn" data-act="back" title="Zurück">←</button>
+    <div class="rowInfo"><div class="pageTitle">${pl.cover} ${esc(pl.name)}</div>
+      <div class="pageSub">${pl.items.length} Titel · nur geschnittene Abschnitte laufen an</div></div>
+    <button class="btn small primary" data-act="play-pl" data-pl="${pl.id}">▶ Alle</button>
+  </div>
+  <div class="chipRow" style="margin-top:12px">
+    <span class="chip ${state.ui.plSort==="title"?"on":""}" data-act="pl-sort" data-s="title">Sorte: Titel</span>
+    <span class="chip ${state.ui.plSort==="cut"?"on":""}" data-act="pl-sort" data-s="cut">Zuerst: mit Schnitt</span>
+    <span class="chip" data-act="add-track" data-pl="${pl.id}">+ Titel hinzufügen</span>
+  </div>
+  <div class="panel">`;
+  let items = pl.items.slice();
+  if (state.ui.plSort === "cut") items.sort((a,b) => (b.cut?1:0)-(a.cut?1:0));
+  items.forEach((it,i) => {
+    const t = track(it.id);
+    const isCur = state.player.trackId === it.id;
+    html += `${i ? '<div class="sep"></div>' : ""}<div class="row64">
+      <div class="num">${i+1}</div>
+      <div class="rowInfo" data-act="play-in-pl" data-pl="${pl.id}" data-t="${it.id}">
+        <div class="rowTitle" style="${isCur?"color:var(--accent)":""}">${esc(t.title)}</div>
+        <div class="rowSub">${esc(t.artist)} · ${mmss(t.dur)} · ${t.fmt.toUpperCase()}</div>
+        <div style="margin-top:5px">${cutBadge(it)}</div>
+        ${it.cut ? `<div class="mono" style="margin-top:3px">✂ ${mmssPrecise(it.cut.start)} → ${mmssPrecise(it.cut.end)}</div>` : ""}
+      </div>
+      <div class="rowRight">
+        <button class="iconBtn" data-act="edit-cut" data-t="${it.id}" data-pl="${pl.id}" title="Schnitt bearbeiten">✂</button>
+        <button class="iconBtn" data-act="track-menu" data-t="${it.id}" data-pl="${pl.id}" title="Mehr">⋯</button>
+      </div></div>`;
+  });
+  html += `</div>
+  <div class="infoBlock">Schneiden: Zeile antippen spielt nur den markierten Abschnitt.
+  Mit <b>✂</b> Start/Ende per Waveform setzen. <b>ganz</b> = ganzer Titel ohne Schnitt.</div>
+  </div>`;
+  $("#s-pl").innerHTML = html;
+}
+
+/* ══════════════════════════ Screen: BIBLIOTHEK ══════════════════════════ */
+function renderLibrary(){
+  const q = state.ui.libQ.toLowerCase();
+  const list = state.tracks.filter(t => !q || t.title.toLowerCase().includes(q) || t.artist.toLowerCase().includes(q));
+  const mb = (state.tracks.reduce((a,t) => a+t.kb, 0)/1024).toFixed(0);
+  let html = `<div class="pad" style="padding-top:16px">
+  <div class="toprow"><div><div class="pageTitle">Bibliothek</div>
+    <div class="pageSub">${state.tracks.length} Dateien · ${mb} MB offline</div></div>
+    <button class="btn small" data-act="import">⬇ Dateien importieren</button></div>
+  <div class="search" style="margin-top:12px">🔍<input id="libQ" placeholder="Titel oder Interpret…" value="${esc(state.ui.libQ)}"></div>`;
+  if (state.ui.importing){
+    html += `<div class="panel" style="padding:12px"><div class="rowTitle">Importiere ${state.ui.importPct < 100 ? "…" : "fertig"}</div>
+      <div class="progress"><i style="width:${state.ui.importPct}%"></i></div>
+      <div class="mono">${state.ui.importPct}% · 3 Dateien · 14,2 MB</div></div>`;
+  }
+  html += `<div class="panel" style="margin-top:10px">`;
+  if (!list.length) html += `<div class="empty">Keine Treffer für „${esc(state.ui.libQ)}“.</div>`;
+  list.forEach((t,i) => {
+    html += `${i ? '<div class="sep"></div>' : ""}<div class="row64">
+      <div class="miniCover">${t.icon}</div>
+      <div class="rowInfo"><div class="rowTitle">${esc(t.title)}</div>
+        <div class="rowSub">${esc(t.artist)} · ${esc(t.album)}</div>
+        <div class="mono" style="margin-top:3px">${t.fmt.toUpperCase()} · ${(t.kb/1024).toFixed(1)} MB · ${mmss(t.dur)}</div></div>
+      <div class="rowRight">
+        <button class="iconBtn" data-act="play-track" data-t="${t.id}" title="Abspielen">▶</button>
+        <button class="iconBtn" data-act="add-to-pl" data-t="${t.id}" title="Zu Playlist">＋</button>
+      </div></div>`;
+  });
+  html += `</div></div>`;
+  $("#s-library").innerHTML = html;
+  const inp = $("#libQ");
+  inp.addEventListener("input", () => { state.ui.libQ = inp.value; });
+  inp.addEventListener("keydown", e => { if (e.key === "Enter"){ e.preventDefault(); renderLibrary(); $("#libQ").focus(); } });
+  if (document.activeElement !== inp && state.ui.libQ) inp.focus();
+}
+
+/* ══════════════════════════ Screen: EINSTELLUNGEN ═══════════════════════ */
+function renderSet(){
+  const s = state.settings;
+  let html = `<div class="pad" style="padding-top:16px">
+  <div class="pageTitle">Einstellungen</div>
+  <div class="sectionHeading">Wiedergabe <span class="line"></span></div>
+  <div class="panel">
+    <div class="kv"><span class="k">Wiederholen</span><span class="v">
+      <button class="btn small" data-act="cycle-repeat">${s.repeat === "all" ? "🔁 Alle" : s.repeat === "one" ? "🔂 Eins" : "⏹ Aus"}</button></span></div>
+    <div class="sep"></div>
+    <div class="kv"><span class="k">Zufallswiedergabe</span><div class="toggle ${s.shuffle?"on":""}" data-act="tgl" data-k="shuffle"></div></div>
+    <div class="sep"></div>
+    <div class="kv"><span class="k">Übergangslos (Gapless)</span><div class="toggle ${s.gapless?"on":""}" data-act="tgl" data-k="gapless"></div></div>
+    <div class="sep"></div>
+    <div class="kv"><span class="k">Blenden an Schnittkanten</span><span class="v">${s.fade.toFixed(1)} s
+      <button class="btn small" data-act="fade-step" style="margin-left:8px">ändern</button></span></div>
+    <div class="sep"></div>
+    <div class="kv"><span class="k">Sleep-Timer</span><span class="v">
+      <button class="btn small" data-act="sleep">${s.sleepMin ? s.sleepMin+" min" : "aus"}</button></span></div>
+  </div>
+  <div class="sectionHeading">Dateien <span class="line"></span></div>
+  <div class="panel">
+    <div class="kv"><span class="k">Musikordner</span><span class="v">${esc(s.folder)}</span></div>
+    <div class="sep"></div>
+    <div class="kv"><span class="k">Formate</span><span class="v">${esc(s.formats)}</span></div>
+    <div class="sep"></div>
+    <div class="kv"><span class="k">Import nur via WLAN</span><div class="toggle ${s.wifiOnly?"on":""}" data-act="tgl" data-k="wifiOnly"></div></div>
+  </div>
+  <div class="sectionHeading">Erscheinung <span class="line"></span></div>
+  <div class="panel">
+    <div class="kv"><span class="k">Design</span><button class="btn small" data-act="theme">${state.theme === "dark" ? "🌙 Dunkel" : "☀️ Hell"}</button></div>
+  </div>
+  <div class="sectionHeading">Schnitt-Daten <span class="line"></span></div>
+  <div class="panel">
+    <div class="kv"><span class="k">Gespeicherte Schnitte</span><span class="v">${state.playlists.flatMap(p=>p.items).filter(i=>i.cut).length}</span></div>
+    <div class="sep"></div>
+    <div class="kv"><span class="k">Alle Schnitte löschen</span><button class="btn small danger" data-act="clear-cuts">Löschen</button></div>
+  </div>
+  <div class="btnrow"><button class="btn" data-act="go-about">ℹ️ Über BeatClip</button></div>
+  <div class="infoBlock">Der Prototyp simuliert die Wiedergabe (Zeitraffer 5×). In der echten App:
+  MediaStore-Scan für lokale Dateien, MediaPlayer/ExoPlayer mit
+  <span class="mono">seekTo(start)</span> + Ende-Überwachung, Schnitte als JSON je Playlist.</div>
+  </div>`;
+  $("#s-set").innerHTML = html;
+}
+
+/* ══════════════════════════ Screen: PLAYER (Vollbild) ═══════════════════ */
+function renderPlayer(){
+  const t = track(state.player.trackId) || state.tracks[0];
+  const s = span() || { start:0, end:t.dur, dur:t.dur, len:t.dur };
+  const cut = activeCut();
+  const it = currentItem()?.it;
+  const q = state.playQueue;
+  const nid = q[(state.qIndex+1) % Math.max(1,q.length)];
+  const nt = track(nid);
+  let html = `
+  <div class="playerHead">
+    <button class="iconBtn" data-act="back" title="Zurück">←</button>
+    <div class="spacer"></div>
+    <span class="pill ${cut?"pillCut":"pillFull"}">${cut ? "✂ Schnitt aktiv" : "ganzer Titel"}</span>
+    <div class="spacer"></div>
+    <button class="iconBtn" data-act="edit-cut" data-t="${t.id}" title="Schnitt bearbeiten">✂</button>
+  </div>
+  <div class="artWrap">${t.icon}<div class="cutTag">${cut ? `${mmssPrecise(cut.start)} – ${mmssPrecise(cut.end)} · ${mmss(cut.end-cut.start)}` : `kompletter Titel · ${mmss(t.dur)}`}</div></div>
+  <div class="pTitle" id="pTitle">${esc(t.title)}</div>
+  <div class="pArtist" id="pArtist">${esc(t.artist)} · ${esc(t.album)}</div>
+  <div class="pTimeline" id="pTimeline">
+    <canvas id="pWave"></canvas>
+    <div class="handle" id="hStart"><i></i><span>S</span></div>
+    <div class="handle" id="hEnd"><i></i><span>E</span></div>
+    <div class="playhead" id="pHead"></div>
+  </div>
+  <div class="pTimes"><span id="pPos">0:00</span><span id="pLen">${mmss(s.len)} von ${mmss(t.dur)}</span></div>
+  <div class="pControls">
+    <button class="ctlBtn ${state.settings.shuffle?"on":""}" data-act="tgl-shuffle" title="Zufall">🔀</button>
+    <button class="ctlBtn" data-act="prev" title="Zurück">⏮</button>
+    <button class="ctlBtn big" data-act="toggle-play">${state.player.playing ? "⏸" : "▶"}</button>
+    <button class="ctlBtn" data-act="next" title="Weiter">⏭</button>
+    <button class="ctlBtn ${state.settings.repeat!=="off"?"on":""}" data-act="cycle-repeat" title="Wiederholen">${state.settings.repeat==="one"?"🔂":"🔁"}</button>
+  </div>
+  <div class="skipRow">
+    <button class="btn" data-act="seek-start">⏮ Zum Schnittanfang</button>
+    <button class="btn" data-act="seek-end">Zum Schnittende ⏭</button>
+  </div>
+  <div class="volRow">🔈<input type="range" id="vol" min="0" max="100" value="70">🔊
+    <span class="mono" id="volVal">70 %</span></div>
+  <div class="nextUp panel"><div class="row64" data-act="play-next">
+    <div class="miniCover">${nt ? nt.icon : "🎵"}</div>
+    <div class="rowInfo"><div class="rowSub" style="margin:0 0 2px">Als Nächstes${it?.cut?" (Schnitt)":""}</div>
+      <div class="rowTitle">${nt ? esc(nt.title) : "–"}</div>
+      <div class="rowSub">${nt ? `${esc(nt.artist)} · ${nt.cut ? mmss(nt.cut.end-nt.cut.start) : mmss(nt.dur)}` : ""}</div></div>
+    <div class="rowRight">▶</div></div></div>
+  `;
+  $("#s-player").innerHTML = html;
+  requestAnimationFrame(() => { drawPlayerTimeline(); updatePlayerText(); });
+  bindTimeline();
+}
+function updatePlayerText(){
+  const s = span(); if (!s) return;
+  const t = track(state.player.trackId);
+  const pos = clamp(state.player.pos, 0, s.dur);
+  $("#pPos").textContent = mmssPrecise(pos);
+  $("#pLen").textContent = `${mmss(s.len)} von ${mmss(t.dur)}`;
+  $("#pHead").style.left = clamp(pos/s.dur*100, 0, 100) + "%";
+}
+function drawPlayerTimeline(){
+  const cv = $("#pWave"); if (!cv) return;
+  const tl = $("#pTimeline");
+  drawWave(cv, tl.clientWidth, tl.clientHeight, state.player.trackId, span(), state.player.pos);
+  const s = span(); if (!s) return;
+  const w = tl.clientWidth;
+  $("#hStart").style.left = (s.start/s.dur*100) + "%";
+  $("#hEnd").style.left = (s.end/s.dur*100) + "%";
+  $("#hStart").style.display = $("#hEnd").style.display = "flex";
+  $("#pHead").style.left = clamp(state.player.pos/s.dur*100, 0, 100) + "%";
+}
+function bindTimeline(){
+  const tl = $("#pTimeline");
+  const t = track(state.player.trackId); if (!t) return;
+  tl.addEventListener("pointerdown", e => {
+    const r = tl.getBoundingClientRect();
+    const hEl = e.target.closest(".handle");
+    if (hEl){
+      state.ui.drag = { el:hEl.id, trackId:state.player.trackId, scope:"player", pl:currentItem()?.pl.id };
+    } else {
+      const sec = (e.clientX - r.left) / r.width * t.dur;
+      state.player.pos = clamp(sec, 0, t.dur);
+      drawPlayerTimeline(); updatePlayerText();
+    }
+  });
+  const vol = $("#vol");
+  vol.addEventListener("input", () => $("#volVal").textContent = vol.value + " %");
+}
+/* Globales Zeiger-Ziehen für alle Griffe */
+document.addEventListener("pointermove", e => {
+  const d = state.ui.drag; if (!d) return;
+  const host = d.scope === "player" ? $("#pTimeline") : $("#wWaveWrap");
+  if (!host) return;
+  const wrap = host.querySelector("canvas").parentElement;
+  const r = wrap.getBoundingClientRect();
+  const frac = clamp((e.clientX - r.left) / r.width, 0, 1);
+  const t = track(d.trackId);
+  const sec = Math.round(frac * t.dur * 10) / 10;
+  const it = itemOf(d.pl, d.trackId);
+  if (!it) return;
+  d.moved = true;
+  if (!it.cut) it.cut = { start:0, end:t.dur };
+  if (d.el === "hStart") it.cut.start = clamp(sec, 0, it.cut.end - 2);
+  else                   it.cut.end   = clamp(sec, it.cut.start + 2, t.dur);
+  if (d.scope === "player"){
+    state.player.pos = clamp(state.player.pos, it.cut.start, it.cut.end);
+    drawPlayerTimeline(); updatePlayerText();
+  } else { drawSheetWave(); updateCutBoxes(); }
+  if (state.screen === "pl") renderPlDetail();
+  if (state.screen === "home") renderHome();
+  renderMini();
+});
+document.addEventListener("pointerup", () => {
+  const d = state.ui.drag; if (!d) return;
+  state.ui.drag = null;
+  if (d.moved){ state.ui.dragged = true; setTimeout(() => state.ui.dragged = false, 250); }
+  const it = itemOf(d.pl, d.trackId);
+  if (it?.cut) toast(`✂ Schnitt ${mmssPrecise(it.cut.start)}–${mmssPrecise(it.cut.end)} (${mmss(it.cut.end-it.cut.start)})`);
+  refreshCurrent();
+});
+
+/* ══════════════════════════ Waveform zeichnen (geteilt) ═════════════════ */
+function drawWave(canvas, w, h, trackId, s, pos){
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = Math.floor(w*dpr); canvas.height = Math.floor(h*dpr);
+  const ctx = canvas.getContext("2d"); ctx.scale(dpr, dpr);
+  ctx.clearRect(0,0,w,h);
+  const t = track(trackId); if (!t) return;
+  const css = getComputedStyle($("#phone"));
+  const colOut = css.getPropertyValue("--wave-out").trim();
+  const colIn  = css.getPropertyValue("--wave-in").trim();
+  const data = waveData(trackId, Math.floor(w/3));
+  const bw = 3, gap = 1, n = data.length;
+  for (let i = 0; i < n; i++){
+    const x = i*bw;
+    const sec = (i*bw)/w * t.dur;
+    const inCut = sec >= s.start && sec <= s.end;
+    ctx.fillStyle = inCut ? colIn : colOut;
+    const bh = data[i] * (h-8);
+    ctx.fillRect(x, (h-bh)/2, bw-gap, bh);
+  }
+  /* dunkle Abblendung außerhalb des Schnitts */
+  ctx.fillStyle = "rgba(0,0,0,.35)";
+  if (s.start > 0) ctx.fillRect(0, 0, (s.start/t.dur)*w, h);
+  if (s.end < t.dur) ctx.fillRect((s.end/t.dur)*w, 0, w - (s.end/t.dur)*w, h);
+}
+
+/* ══════════════════════════ Sheet: SCHNITT-EDITOR ═══════════════════════ */
+function openCutEditor(trackId, plId){
+  const t = track(trackId); if (!t) return;
+  const pl = plId ? playlist(plId) : currentItem()?.pl || playlist("pl4");
+  let it = pl.items.find(i => i.id === trackId);
+  if (!it){ const all = playlist("pl4"); it = all.items.find(i => i.id === trackId); pl = all; }
+  if (!it) return;
+  if (!it.cut) it.cut = { start:0, end:t.dur };
+  state.ui.editTrack = trackId;
+  state.ui.editPl = pl.id;
+  const dur = it.cut.end - it.cut.start;
+  openSheet(`
+    <div class="grab"></div>
+    <h2>✂ Schnitt: ${esc(t.title)}</h2>
+    <div class="sub">${esc(t.artist)} · Gesamtlänge ${mmss(t.dur)} · ${pl.name}</div>
+    <div class="waveWrap" id="wWaveWrap">
+      <canvas id="wWave"></canvas>
+      <div class="handle" id="hStart"><i></i><span>S</span></div>
+      <div class="handle" id="hEnd"><i></i><span>E</span></div>
+      <div class="playhead" id="wHead"></div>
+    </div>
+    <div class="cutInfo">
+      <div class="cutBox start"><div class="lbl">Start</div><div class="val" id="cStart">0:00</div></div>
+      <div class="cutBox dur"><div class="lbl">Dauer</div><div class="val" id="cDur">${mmss(dur)}</div></div>
+      <div class="cutBox end"><div class="lbl">Ende</div><div class="val" id="cEnd">${mmss(t.dur)}</div></div>
+    </div>
+    <div class="nudge">
+      <button data-act="nudge" data-d="-5">−5 s</button>
+      <button data-act="nudge" data-d="-1">−1 s</button>
+      <button data-act="nudge-s">↔ 1 s</button>
+      <button data-act="nudge" data-d="1">+1 s</button>
+      <button data-act="nudge" data-d="5">+5 s</button>
+    </div>
+    <div class="mono" style="text-align:center;margin-top:8px">Griffe S/E ziehen · Fläche antippen = Playhead</div>
+    <div class="btnrow" style="margin-bottom:0">
+      <button class="btn" data-act="cut-play">▶ Vorschau</button>
+      <button class="btn" data-act="cut-reset">Schnitt löschen</button>
+    </div>
+    <div class="sheetbtns" style="margin-top:10px">
+      <button class="btn" data-act="sheet-close">Abbrechen</button>
+      <button class="btn primary" data-act="cut-save">Schnitt speichern</button>
+    </div>
+  `);
+  requestAnimationFrame(drawSheetWave);
+  /* Timeline im Sheet: Playhead + ziehen */
+  $("#wWaveWrap").addEventListener("pointerdown", e => {
+    const r = $("#wWaveWrap").getBoundingClientRect();
+    if (e.target.closest(".handle")){
+      state.ui.drag = { el:e.target.closest(".handle").id, trackId, scope:"sheet", pl:pl.id };
+    } else {
+      state.player.pos = clamp((e.clientX-r.left)/r.width*t.dur, 0, t.dur);
+      drawSheetWave();
+    }
+  });
+}
+function drawSheetWave(){
+  const wrap = $("#wWaveWrap"); if (!wrap) return;
+  const t = track(state.ui.editTrack); if (!t) return;
+  const it = itemOf(state.ui.editPl, state.ui.editTrack);
+  const s = { start: it?.cut?.start ?? 0, end: it?.cut?.end ?? t.dur, dur:t.dur };
+  drawWave($("#wWave"), wrap.clientWidth, wrap.clientHeight, state.ui.editTrack, s, state.player.pos);
+  $("#hStart").style.left = (s.start/t.dur*100) + "%";
+  $("#hEnd").style.left = (s.end/t.dur*100) + "%";
+  $("#wHead").style.left = clamp(state.player.pos/t.dur*100, 0, 100) + "%";
+  updateCutBoxes();
+}
+function updateCutBoxes(){
+  const it = itemOf(state.ui.editPl, state.ui.editTrack); if (!it) return;
+  $("#cStart").textContent = mmssPrecise(it.cut.start);
+  $("#cEnd").textContent = mmssPrecise(it.cut.end);
+  $("#cDur").textContent = mmssPrecise(it.cut.end - it.cut.start);
+}
+
+/* ══════════════════════════ Weitere Sheets ══════════════════════════════ */
+function openTrackMenu(trackId, plId){
+  const t = track(trackId);
+  openSheet(`<div class="grab"></div><h2>${esc(t.title)}</h2>
+    <div class="sub">${esc(t.artist)} · ${t.fmt.toUpperCase()} · ${mmss(t.dur)}</div>
+    <div class="menuitem" data-act="edit-cut" data-t="${trackId}" data-pl="${plId}">✂ Schnitt bearbeiten</div>
+    <div class="menuitem" data-act="cut-remove" data-t="${trackId}" data-pl="${plId}">⊘ Schnitt entfernen (ganz abspielen)</div>
+    <div class="menuitem" data-act="add-to-pl" data-t="${trackId}">＋ Zu anderer Playlist hinzufügen</div>
+    <div class="menuitem dngr" data-act="pl-remove" data-t="${trackId}" data-pl="${plId}">🗑 Aus Playlist entfernen</div>
+    <div class="menuitem dngr" data-act="file-remove" data-t="${trackId}">⚠ Vom Gerät löschen</div>
+    <div class="sheetbtns"><button class="btn" data-act="sheet-close">Schließen</button></div>`);
+}
+function openAddToPl(trackId){
+  const rows = state.playlists.filter(p => p.id !== "pl4").map(p => {
+    const has = p.items.some(i => i.id === trackId);
+    return `<div class="menuitem" data-act="pl-add" data-t="${trackId}" data-pl="${p.id}">
+      ${p.cover} ${esc(p.name)} <span class="spacer"></span>${has ? `<span class="pill pillOn">drin</span>` : "hinzufügen"}</div>`;
+  }).join("");
+  openSheet(`<div class="grab"></div><h2>Zu Playlist hinzufügen</h2>
+    <div class="sub">${esc(track(trackId).title)}</div>${rows}
+    <div class="sheetbtns"><button class="btn" data-act="sheet-close">Fertig</button></div>`);
+}
+function openNewPl(){
+  openSheet(`<div class="grab"></div><h2>Neue Playlist</h2>
+    <div class="sub">Name und Symbol wählen</div>
+    <div class="search" style="margin-bottom:12px">🎶<input id="npName" placeholder="z. B. Frühstücks-Hooks"></div>
+    <div class="chipRow">${["🎧","☀️","🔥","🌙","🏃","🎉","🧠","🌧️"].map((e,i) =>
+      `<span class="chip ${i===0?"on":""}" data-act="np-icon" data-e="${e}">${e}</span>`).join("")}</div>
+    <div class="sheetbtns"><button class="btn" data-act="sheet-close">Abbrechen</button>
+    <button class="btn primary" data-act="np-create">Anlegen</button></div>`);
+  state.ui.npIcon = "🎧";
+}
+
+/* ══════════════════════════ Mini-Player ═════════════════════════════════ */
+function renderMini(){
+  const m = $("#mini"), t = track(state.player.trackId);
+  if (!t){ m.style.display = "none"; return; }
+  m.style.display = "block";
+  const s = span();
+  $("#miniCover").textContent = t.icon;
+  $("#miniTitle").textContent = t.title;
+  $("#miniSub").textContent = activeCut()
+    ? `✂ ${mmssPrecise(s.start)}–${mmssPrecise(s.end)} · ${mmss(s.len)}`
+    : `${t.artist} · ${mmss(t.dur)}`;
+  $("#miniPlay").textContent = state.player.playing ? "⏸" : "▶";
+  const frac = clamp((state.player.pos - s.start) / s.len, 0, 1);
+  $("#miniBarFill").style.width = (frac*100) + "%";
+}
+
+/* ══════════════════════════ About ═══════════════════════════════════════ */
+function renderAbout(){
+  $("#s-about").innerHTML = `<div class="pad" style="padding-top:14px">
+  <div class="toprow"><button class="iconBtn" data-act="back">←</button><div class="spacer"></div></div>
+  <div class="aboutBlock"><div class="logoTile">🎧</div>
+    <div class="aboutTitle">BeatClip</div><div class="aboutVer">v1 · HTML-Prototyp · Offline-Player</div>
+    <div class="aboutText">Spielt lokal gespeicherte Audiodateien. Jeder Titel in einer
+    Playlist hat eigene Start- und Endmarken – abgespielt wird nur der Abschnitt dazwischen.</div></div>
+  <div class="sectionHeading">So funktioniert's <span class="line"></span></div>
+  <div class="panel" style="padding:12px 14px">
+    ${[["1","Audiodateien auf dem Handy importieren (Bibliothek → Import)."],
+        ["2","Titel in eine Playlist aufnehmen."],
+        ["3","Mit ✂ Start/Ende an der Waveform setzen – oder per Feinjustage ±1 s."],
+        ["4","Play drücken: der Titel springt zum Startpunkt und stoppt beim Endpunkt."]]
+      .map(([n,tx]) => `<div class="stepline"><span class="num">${n}</span><span>${tx}</span></div>`).join("")}
+  </div>
+  <div class="infoBlock">Hinweis Prototyp: Die Wiedergabe ist simuliert (5× Zeitraffer), es werden
+  keine echten Audiodateien geladen. Farbwelt + Framesprache übernommen aus WOL
+  <span class="mono">Android_50.html</span> und Copilot Chat <span class="mono">Mobile_Chat_51.html</span>.</div>
+  </div>`;
+}
+
+/* ══════════════════════════ Aktionen (data-act) ═════════════════════════ */
+function handle(act, el){
+  const ds = el.dataset;
+  switch (act){
+    case "theme":
+      state.theme = state.theme === "dark" ? "light" : "dark";
+      $("#phone").dataset.theme = state.theme; refreshCurrent(); break;
+    case "back": back(); break;
+    case "go-player": go("player"); break;
+    case "go-about": go("about"); break;
+    case "open-pl": state.ui.activePl = ds.pl; go("pl"); break;
+    case "pl-sort": state.ui.plSort = ds.s; renderPlDetail(); break;
+    case "play-track": playTrack(ds.t, "pl4"); break;
+    case "play-in-pl": playTrack(ds.t, ds.pl); break;
+    case "play-pl": { const p = playlist(ds.pl);
+      if (!p.items.length){ toast(`„${p.name}“ ist leer – erst Titel hinzufügen`, true); break; }
+      playTrack(p.items[0].id, ds.pl); break; }
+    case "play-next": nextTrack(true); break;
+    case "toggle-play": togglePlay(); break;
+    case "next": nextTrack(true); break;
+    case "prev": prevTrack(); break;
+    case "tgl-shuffle": state.settings.shuffle = !state.settings.shuffle; refreshCurrent(); break;
+    case "cycle-repeat": {
+      const r = state.settings.repeat;
+      state.settings.repeat = r === "all" ? "one" : r === "one" ? "off" : "all";
+      refreshCurrent(); renderMini(); break;
+    }
+    case "seek-start": { const s = span(); if (s){ state.player.pos = s.start; renderMini(); refreshCurrent(); } break; }
+    case "seek-end": { const s = span(); if (s){ state.player.pos = s.end - 0.1; renderMini(); refreshCurrent(); } break; }
+    case "edit-cut": openCutEditor(ds.t, ds.pl || currentItem()?.pl?.id); break;
+    case "track-menu": openTrackMenu(ds.t, ds.pl); break;
+    case "add-to-pl": openAddToPl(ds.t); break;
+    case "add-track": openAddToPl(null); break;
+    case "pl-add": {
+      const pl = playlist(ds.pl);
+      if (!pl.items.some(i => i.id === ds.t)){
+        pl.items.push({ id:ds.t, cut:null });
+        toast(`➕ ${track(ds.t).title} → ${pl.name}`);
+      }
+      closeSheet(); refreshCurrent(); break;
+    }
+    case "cut-remove": { const it = itemOf(ds.pl, ds.t); if (it) it.cut = null; closeSheet(); toast("Schnitt entfernt – ganzer Titel"); refreshCurrent(); renderMini(); break; }
+    case "pl-remove": { const pl = playlist(ds.pl); pl.items = pl.items.filter(i => i.id !== ds.t); closeSheet(); toast("Aus Playlist entfernt"); refreshCurrent(); break; }
+    case "file-remove": closeSheet(); toast("Vom Gerät löschen: in echter App mit Sicherheitsabfrage", true); break;
+    case "clear-cuts": {
+      let n = 0; state.playlists.forEach(p => p.items.forEach(i => { if (i.cut){ i.cut = null; n++; } }));
+      toast(`${n} Schnitte gelöscht`); refreshCurrent(); renderMini(); break;
+    }
+    case "tgl": state.settings[ds.k] = !state.settings[ds.k]; renderSet(); break;
+    case "fade-step": state.settings.fade = +(state.settings.fade + .5 > 4 ? 0 : state.settings.fade + .5).toFixed(1);
+      renderSet(); toast(`Blendzeit: ${state.settings.fade} s`); break;
+    case "sleep": {
+      const opts = [0, 15, 30, 45, 60];
+      state.settings.sleepMin = opts[(opts.indexOf(state.settings.sleepMin)+1) % opts.length];
+      renderSet(); toast(state.settings.sleepMin ? `Sleep-Timer: ${state.settings.sleepMin} min` : "Sleep-Timer aus"); break;
+    }
+    case "new-pl": openNewPl(); break;
+    case "np-icon": state.ui.npIcon = ds.e;
+      $$(".chip[data-act=np-icon]").forEach(c => c.classList.toggle("on", c.dataset.e === ds.e)); break;
+    case "np-create": {
+      const name = ($("#npName")?.value || "").trim() || "Neue Playlist";
+      const id = "pl" + (state.playlists.length + 1);
+      state.playlists.push({ id, name, cover:state.ui.npIcon || "🎧", items:[] });
+      closeSheet(); toast(`Playlist „${name}“ angelegt`); renderPlaylists(); break;
+    }
+    case "import": {
+      state.ui.importing = true; state.ui.importPct = 0; renderLibrary();
+      const iv = setInterval(() => {
+        state.ui.importPct = Math.min(100, state.ui.importPct + 20);
+        if ($("#s-library").classList.contains("active")) renderLibrary();
+        if (state.ui.importPct >= 100){ clearInterval(iv);
+          state.ui.importing = false; setTimeout(() => { if (state.screen==="library") renderLibrary(); toast("3 Dateien importiert (14,2 MB)"); }, 400); }
+      }, 350);
+      break;
+    }
+    case "fab-cut": {
+      const cur = state.player.trackId;
+      const target = cur || (state.ui.activePl ? playlist(state.ui.activePl)?.items[0]?.id : null) || state.tracks[0].id;
+      openCutEditor(target, currentItem()?.pl?.id || state.ui.activePl);
+      break;
+    }
+    case "sheet-close": closeSheet(); refreshCurrent(); break;
+    case "cut-save": {
+      const it = itemOf(state.ui.editPl, state.ui.editTrack);
+      closeSheet(); toast(`✂ Schnitt gespeichert: ${mmssPrecise(it.cut.start)}–${mmssPrecise(it.cut.end)}`);
+      refreshCurrent(); renderMini(); break;
+    }
+    case "cut-reset": {
+      const it = itemOf(state.ui.editPl, state.ui.editTrack);
+      const t = track(state.ui.editTrack);
+      it.cut = { start:0, end:t.dur };
+      drawSheetWave(); toast("Schnitt zurückgesetzt (ganzer Titel)"); break;
+    }
+    case "cut-play": {
+      const it = itemOf(state.ui.editPl, state.ui.editTrack);
+      state.player.trackId = state.ui.editTrack;
+      state.playQueue = playlist(state.ui.editPl).items.map(i => i.id);
+      state.qIndex = state.playQueue.indexOf(state.ui.editTrack);
+      state.player.pos = it.cut.start; state.player.playing = true;
+      renderMini(); break;
+    }
+    case "nudge": {
+      const it = itemOf(state.ui.editPl, state.ui.editTrack);
+      const t = track(state.ui.editTrack);
+      const d = +ds.d;
+      const focus = state.ui.nudgeFocus || "end";
+      if (focus === "start") it.cut.start = clamp(it.cut.start + d, 0, it.cut.end - 2);
+      else it.cut.end = clamp(it.cut.end + d, it.cut.start + 2, t.dur);
+      drawSheetWave(); break;
+    }
+    case "nudge-s": state.ui.nudgeFocus = state.ui.nudgeFocus === "start" ? "end" : "start";
+      toast(`Feinjustage: ${state.ui.nudgeFocus === "start" ? "Startmarke" : "Endmarke"}`); break;
+  }
+}
+
+/* ══════════════════════════ Event-Delegation ════════════════════════════ */
+document.addEventListener("click", e => {
+  const el = e.target.closest("[data-act]");
+  if (!el) return;
+  if (state.ui.drag || state.ui.dragged) return;   /* nach Griffe-Ziehen kein Klick auslösen */
+  const act = el.dataset.act;
+  e.stopPropagation();
+  handle(act, el);
+});
+/* Klick ins Sheet-Overlay schließt */
+$("#sheet").addEventListener("pointerdown", e => {
+  if (!e.target.closest(".handle")) state.ui.nudgeFocus = state.ui.nudgeFocus || "end";
+});
+
+/* ══════════════════════════ Init ════════════════════════════════════════ */
+function tick(){ $("#clock").textContent = clockStr(); }
+tick(); setInterval(tick, 20000);
+renderHome();
+</script>
+</body>
+</html>

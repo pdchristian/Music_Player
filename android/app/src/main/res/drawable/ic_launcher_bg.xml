@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Teal-Verlauf als Hintergrund des adaptiven Launcher-Icons -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <gradient
+        android:startColor="#00b8a9"
+        android:endColor="#0e7490"
+        android:angle="135" />
+</shape>
