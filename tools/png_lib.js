@@ -33,6 +33,10 @@ function png(width, height, rgba){
 }
 const lerp = (a,b,t) => a + (b-a)*t;
 
+/* Hintergrund-Verlauf identisch zur WOL-App: vertikaler Teal-Verlauf
+   (oben #38a790, unten #287767), siehe WOL res/drawable-nodpi/ic_launcher_background.png */
+const BG_TOP = [56,167,144], BG_BOTTOM = [40,119,103];
+
 /**
  * Icon als RGBA-Puffer.
  *  opts: { rounded:boolean, radius:number, glyphScale:number, background:"gradient"|"flat"|"transparent", pad:number }
@@ -44,7 +48,6 @@ function drawIcon(size, opts = {}){
   const glyphScale = opts.glyphScale || 1;
   const bg = opts.background || "gradient";
   const buf = Buffer.alloc(size*size*4);
-  const c1 = [0,184,169], c2 = [14,116,144];
   const inSize = (size - pad*2) * glyphScale;
   const cx0 = pad + (size - pad*2)/2 - inSize/2;
   const cy0 = pad + (size - pad*2)/2 - inSize/2;
@@ -72,10 +75,10 @@ function drawIcon(size, opts = {}){
       if (bg === "transparent"){ buf[i+3] = 0; }
       else if (bg === "flat"){ buf[i]=15; buf[i+1]=17; buf[i+2]=21; buf[i+3]=255; }
       else {
-        const t = (x+y)/(size*2);
-        buf[i]   = lerp(c1[0],c2[0],t);
-        buf[i+1] = lerp(c1[1],c2[1],t);
-        buf[i+2] = lerp(c1[2],c2[2],t);
+        const t = size > 1 ? y/(size-1) : 0;
+        buf[i]   = lerp(BG_TOP[0],BG_BOTTOM[0],t);
+        buf[i+1] = lerp(BG_TOP[1],BG_BOTTOM[1],t);
+        buf[i+2] = lerp(BG_TOP[2],BG_BOTTOM[2],t);
         buf[i+3] = 255;
       }
       if (isGlyph(x,y)){ buf[i]=255; buf[i+1]=255; buf[i+2]=255; buf[i+3]=255; }

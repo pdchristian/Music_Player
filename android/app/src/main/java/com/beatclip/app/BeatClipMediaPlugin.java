@@ -2,6 +2,10 @@ package com.beatclip.app;
 
 import android.Manifest;
 import android.content.Intent;
+import android.media.MediaCodec;
+import android.media.MediaCodecInfo;
+import android.media.MediaFormat;
+import android.media.MediaMuxer;
 import android.net.Uri;
 import android.content.pm.PackageManager;
 import android.os.Build;
@@ -38,6 +42,7 @@ public class BeatClipMediaPlugin extends Plugin {
 
     private AudioHoldService.Listener mediaListener;
     private final Map<String, File> exportFiles = new ConcurrentHashMap<>();
+    private final Map<String, File> encodeWavFiles = new ConcurrentHashMap<>();
 
     @Override
     public void load() {
@@ -240,6 +245,11 @@ public class BeatClipMediaPlugin extends Plugin {
     public void saveAudioExport(PluginCall call) {
         String id = call.getString("id");
         String name = call.getString("name");
+        openSaveDialog(call, id, name, call.getString("mime", "audio/wav"));
+    }
+
+    /** Oeffnet den System-Speicherdialog fuer die fertige Export-/Encodedatei. */
+    private void openSaveDialog(PluginCall call, String id, String name, String mime) {
         File file = id == null ? null : exportFiles.get(id);
         if (file == null || name == null || !file.isFile() || file.length() == 0) {
             call.reject("Exportdatei fehlt oder ist leer");
@@ -247,7 +257,7 @@ public class BeatClipMediaPlugin extends Plugin {
         }
         Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
         intent.addCategory(Intent.CATEGORY_OPENABLE);
-        intent.setType("audio/wav");
+        intent.setType(mime);
         intent.putExtra(Intent.EXTRA_TITLE, name);
         startActivityForResult(call, intent, "saveAudioExportResult");
     }
@@ -258,6 +268,207 @@ public class BeatClipMediaPlugin extends Plugin {
         File file = id == null ? null : exportFiles.remove(id);
         if (file != null) file.delete();
         call.resolve();
+    }
+
+    /* ---------------- M4A-Encode (Kanäle -> AAC/MP4) ----------------
+       Die Web-Seite liefert denselben WAV-Stream wie beim reinen WAV-Export;
+       hier wird er mit MediaCodec (AAC) + MediaMuxer in eine MP4-Datei
+       umgewandelt und dann ueber den System-Speicherdialog gesichert.     */
+
+    @PluginMethod
+    public void beginAudioEncode(PluginCall call) {
+        String name = call.getString("name");
+        if (name == null || name.trim().isEmpty() || name.contains("/") || name.contains("\\")) {
+            call.reject("Ungueltiger Dateiname");
+            return;
+        }
+        try {
+            File dir = new File(getContext().getCacheDir(), "audio_encodes");
+            if (!dir.exists() && !dir.mkdirs()) throw new java.io.IOException("Encodeordner konnte nicht erstellt werden");
+            String id = java.util.UUID.randomUUID().toString();
+            File file = new File(dir, id + ".wav");
+            if (!file.createNewFile()) throw new java.io.IOException("Encodedatei konnte nicht angelegt werden");
+            encodeWavFiles.put(id, file);
+            JSObject result = new JSObject();
+            result.put("id", id);
+            call.resolve(result);
+        } catch (Exception e) {
+            call.reject("Encode konnte nicht vorbereitet werden: " + e.getMessage());
+        }
+    }
+
+    @PluginMethod
+    public void writeAudioEncodeChunk(PluginCall call) {
+        String id = call.getString("id");
+        String encoded = call.getString("data");
+        Double rawOffset = call.getDouble("offset");
+        File file = id == null ? null : encodeWavFiles.get(id);
+        if (file == null || encoded == null || rawOffset == null || rawOffset < 0
+                || rawOffset > Long.MAX_VALUE) {
+            call.reject("Ungueltiger Encodeblock");
+            return;
+        }
+        try (RandomAccessFile output = new RandomAccessFile(file, "rw")) {
+            output.seek(rawOffset.longValue());
+            output.write(Base64.getDecoder().decode(encoded));
+            call.resolve();
+        } catch (Exception e) {
+            call.reject("Encodeblock konnte nicht geschrieben werden: " + e.getMessage());
+        }
+    }
+
+    @PluginMethod
+    public void cancelAudioEncode(PluginCall call) {
+        String id = call.getString("id");
+        File file = id == null ? null : encodeWavFiles.remove(id);
+        if (file != null) file.delete();
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void finishAudioEncode(PluginCall call) {
+        String id = call.getString("id");
+        String name = call.getString("name");
+        File wav = id == null ? null : encodeWavFiles.get(id);
+        if (wav == null || name == null || !wav.isFile() || wav.length() < 45) {
+            call.reject("Encodedatei fehlt oder ist zu kurz");
+            return;
+        }
+        // Die WAV-Blob ist komplett uebertragen, also aus der Tabelle nehmen;
+        // das Ergebnis kommt in exportFiles, damit der Speicherdialog sie findet.
+        encodeWavFiles.remove(id);
+        new Thread(() -> {
+            File m4a = null;
+            try {
+                m4a = encodeWavToM4a(wav);
+                wav.delete();
+                String encodeId = java.util.UUID.randomUUID().toString();
+                exportFiles.put(encodeId, m4a);
+                execute(() -> openSaveDialog(call, encodeId, name, "audio/mp4"));
+            } catch (Exception e) {
+                if (wav != null) wav.delete();
+                if (m4a != null) m4a.delete();
+                call.reject("M4A-Encoding fehlgeschlagen: " + e.getMessage());
+            }
+        }, "BeatClipM4aEncode").start();
+    }
+
+    private File encodeWavToM4a(File wav) throws Exception {
+        try (RandomAccessFile in = new RandomAccessFile(wav, "r")) {
+            byte[] riff = new byte[4];
+            in.readFully(riff);
+            if (!"RIFF".equals(new String(riff))) throw new java.io.IOException("Kein RIFF/WAVE");
+            in.seek(8);
+            byte[] wave = new byte[4];
+            in.readFully(wave);
+            if (!"WAVE".equals(new String(wave))) throw new java.io.IOException("Kein WAVE-Header");
+            in.seek(20);
+            byte[] fmt = new byte[16];
+            in.readFully(fmt);
+            int audioFormat = (fmt[0] & 0xff) | ((fmt[1] & 0xff) << 8);
+            int channels = (fmt[2] & 0xff) | ((fmt[3] & 0xff) << 8);
+            long sampleRate = (fmt[4] & 0xffL) | ((fmt[5] & 0xffL) << 8)
+                    | ((fmt[6] & 0xffL) << 16) | ((fmt[7] & 0xffL) << 24);
+            if (audioFormat != 1) throw new java.io.IOException("Nur unkomprimierte PCM-WAVs werden unterstuetzt");
+            if (channels < 1 || channels > 8) throw new java.io.IOException("Ungueltige Kanalzahl");
+            if (sampleRate <= 0) throw new java.io.IOException("Ungueltige Samplerate");
+
+            int dataOffset = 44;
+            in.seek(36);
+            while (in.getFilePointer() + 8 <= in.length()) {
+                byte[] ck = new byte[8];
+                in.readFully(ck);
+                String id = new String(ck, 0, 4);
+                long size = (ck[4] & 0xffL) | ((ck[5] & 0xffL) << 8)
+                        | ((ck[6] & 0xffL) << 16) | ((ck[7] & 0xffL) << 24);
+                if ("data".equals(id)) { dataOffset = (int) in.getFilePointer(); break; }
+                in.seek(in.getFilePointer() + size + (size % 2));
+            }
+            long dataBytes = in.length() - dataOffset;
+            return encodePcmToM4a(in, dataOffset, dataBytes, channels, sampleRate);
+        }
+    }
+
+    private File encodePcmToM4a(RandomAccessFile pcm, int dataOffset, long dataBytes,
+                                int channels, long sampleRate) throws Exception {
+        int bitRate = (int) Math.min(320_000, Math.max(96_000, channels * sampleRate * 16 * 0.4));
+        // Encoder-Format: AAC-Parameter kommen ins Eingangsformat, geliefert wird PCM.
+        MediaFormat format = MediaFormat.createAudioFormat(MediaFormat.MIMETYPE_AUDIO_AAC,
+                (int) sampleRate, channels);
+        format.setInteger(MediaFormat.KEY_BIT_RATE, bitRate);
+        format.setInteger(MediaFormat.KEY_AAC_PROFILE,
+                MediaCodecInfo.CodecProfileLevel.AACObjectLC);
+        format.setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, 16_384);
+
+        MediaCodec encoder = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_AUDIO_AAC);
+        encoder.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
+        encoder.start();
+
+        File out = new File(getContext().getCacheDir(), "audio_encodes");
+        if (!out.exists()) out.mkdirs();
+        out = new File(out, java.util.UUID.randomUUID() + ".m4a");
+        MediaMuxer muxer = new MediaMuxer(out.getAbsolutePath(),
+                MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4);
+
+        boolean inputDone = false, outputDone = false;
+        int muxerTrack = -1;
+        long framesSent = 0;
+        long remaining = dataBytes;
+        MediaCodec.BufferInfo info = new MediaCodec.BufferInfo();
+        pcm.seek(dataOffset);
+        try {
+            while (!outputDone) {
+                if (!inputDone) {
+                    int inIdx = encoder.dequeueInputBuffer(10_000);
+                    if (inIdx >= 0) {
+                        java.nio.ByteBuffer buf = encoder.getInputBuffer(inIdx);
+                        buf.clear();
+                        int toCopy = (int) Math.min(buf.capacity(), remaining);
+                        if (toCopy > 0) {
+                            byte[] tmp = new byte[toCopy];
+                            pcm.readFully(tmp);
+                            buf.put(tmp);
+                        }
+                        remaining -= toCopy;
+                        boolean last = remaining <= 0;
+                        long pts = (framesSent * 1_000_000L) / sampleRate;
+                        encoder.queueInputBuffer(inIdx, 0, toCopy, pts,
+                                last ? MediaCodec.BUFFER_FLAG_END_OF_STREAM : 0);
+                        framesSent += toCopy / (channels * 2L);
+                        if (last) inputDone = true;
+                    }
+                }
+                int outIdx = encoder.dequeueOutputBuffer(info, 10_000);
+                if (outIdx >= 0) {
+                    boolean codecConfig = (info.flags & MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0;
+                    if (!codecConfig && info.size > 0) {
+                        if (muxerTrack < 0) {
+                            muxerTrack = muxer.addTrack(encoder.getOutputFormat());
+                            muxer.start();
+                        }
+                        java.nio.ByteBuffer buf = encoder.getOutputBuffer(outIdx);
+                        buf.position(info.offset);
+                        buf.limit(info.offset + info.size);
+                        muxer.writeSampleData(muxerTrack, buf, info);
+                    }
+                    encoder.releaseOutputBuffer(outIdx, false);
+                    if ((info.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) outputDone = true;
+                } else if (outIdx == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
+                    if (muxerTrack < 0) {
+                        muxerTrack = muxer.addTrack(encoder.getOutputFormat());
+                        muxer.start();
+                    }
+                }
+            }
+        } finally {
+            try { encoder.stop(); } catch (Exception ignore) {}
+            encoder.release();
+            if (muxerTrack >= 0) {
+                try { muxer.stop(); } catch (Exception ignore) {}
+            }
+            muxer.release();
+        }
+        return out;
     }
 
     @ActivityCallback

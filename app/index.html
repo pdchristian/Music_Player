@@ -79,12 +79,16 @@
   <div class="toast" id="toast" role="status"></div>
 
   <!-- Datei-Import -->
-  <input type="file" id="filePick" accept="audio/*,.mp3,.m4a,.aac,.ogg,.opus,.wav,.flac,.webm" multiple hidden>
+  <!-- bewusst OHNE accept: Android/WebView filtert nur nach MIME-Typen und blendet
+       .m4a-Dateien (oft als video/mp4 oder unbekannt gemeldet) sonst komplett aus.
+       Die Formate werden beim Import in app.js geprüft. -->
+  <input type="file" id="filePick" multiple hidden>
 
   <!-- Wiedergabe-Engine (ein MediaElement = beste Bluetooth-/Sperrbildschirm-Routing-Kompatibilität) -->
   <audio id="audio" preload="auto"></audio>
 </div>
 
+<script src="vendor/lamejs.iife.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

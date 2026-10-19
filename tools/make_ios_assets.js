@@ -16,11 +16,14 @@ function write(file, buf){
   console.log("  +", path.relative(path.join(__dirname, ".."), file));
 }
 
-/* ── App-Symbol: modernes Ein-1024er-Format (Xcode erzeugt alle Groessen) ── */
+/* ── App-Symbol: modernes Ein-1024er-Format (Xcode erzeugt alle Groessen) ──
+   Volle Flaeche ohne abgerundete Ecken: iOS maskiert die Vorlage selbst und
+   verlangt ein opakes Bild (kein Alpha-Kanal). Kulisse = vertikaler Teal-Verlauf
+   wie bei der WOL-App. */
 const appiconDir = path.join(assets, "AppIcon.appiconset");
 fs.rmSync(path.join(appiconDir, "AppIcon-512@2x.png"), { force: true });
 write(path.join(appiconDir, "AppIcon-1024.png"),
-  png(1024, 1024, drawIcon(1024, { rounded: true, radius: 1024*0.22 })));
+  png(1024, 1024, drawIcon(1024, { rounded: false, radius: 0 })));
 fs.writeFileSync(path.join(appiconDir, "Contents.json"), JSON.stringify({
   images: [ { filename: "AppIcon-1024.png", idiom: "universal", platform: "ios", size: "1024x1024" } ],
   info: { author: "xcode", version: 1 },

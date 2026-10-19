@@ -10,6 +10,11 @@
    • Waveform aus echten Audiodaten (Peak-MinMax), Griffe zum Schneiden
    ═══════════════════════════════════════════════════════════════════════ */
 
+/* Build-Marke: mit versionName/versionCode in android/app/build.gradle (bzw.
+   ios/…/Info.plist) hochziehen, damit auf Geraeten erkennbar ist, welcher Stand
+   installiert ist. */
+const APP_VER = "1.1", APP_BUILD = 2;
+
 /* ─────────────────────────── Utils ───────────────────────────────────── */
 const $  = s => document.querySelector(s);
 const $$ = s => Array.from(document.querySelectorAll(s));
@@ -38,6 +43,7 @@ const state = {
   screen:"home", stack:[],
   ui:{ libQ:"", plSort:"title", activePl:null, drag:null, reorder:null, dragged:false, editTrack:null,
        editPl:null, nudgeFocus:"end", importing:false, importDone:0, importTotal:0,
+       exportBusy:null,
        npIcon:"🎧", deferredInstall:null },
   db:{ ok:false, error:null },
   playlists:[],       // {id,name,cover,items:[{id,trackId,cut:{start,end}|null}]}
@@ -53,7 +59,7 @@ const state = {
 const DB_NAME = "beatclip", DB_VER = 1;
 let idb = null;
 const recorderState = { recorder:null, stream:null, chunks:[], startedAt:0, timer:null, requesting:false, saving:false };
-let channelExportFiles = [], channelExportUrls = [];
+let channelExportFiles = [], channelExportData = null, channelExportTrack = null, channelExportFormat = "wav";
 function openDB(){
   return new Promise((res, rej) => {
     const rq = indexedDB.open(DB_NAME, DB_VER);
@@ -160,10 +166,95 @@ function wavChannelsToBlob(channels, sampleRate){
   return new Blob([dv.buffer], { type:"audio/wav" });
 }
 function wavToBlob(buffer, sampleRate){ return wavChannelsToBlob([buffer], sampleRate); }
+/* MP3-Encodung (lamejs, wird als vendor/lamejs.iife.js in index.html geladen).
+   Laeuft in Stuecken und gibt den Main-Thread zwischendurch frei, damit die
+   Fortschrittsanzeige im Sheet fluessig bleibt. */
+const EXPORT_ABORT = { name:"EXPORT_ABORTED" };   // Signal: Lauf wurde verworfen
+let exportJob = 0;                                // erhoht sich bei Abbruch/Sheet-Zu
+const nextTick = () => new Promise(r => setTimeout(r, 0));
+function exportAlive(job){ return job === exportJob; }
+
+async function mp3ChannelsToBlob(channels, sampleRate, kbps, report){
+  if (!window.lamejs?.Mp3Encoder) return null;
+  const tell = report || (() => {});
+  const job = exportJob;
+  const channelCount = Math.min(2, channels.length);
+  const encoder = new lamejs.Mp3Encoder(channelCount, sampleRate, kbps || 192);
+  const chunk = 1152*40, parts = [];
+  const toI16 = ch => {
+    const out = new Int16Array(ch.length);
+    for (let i = 0; i < ch.length; i++){
+      const s = clamp(ch[i], -1, 1);
+      out[i] = s < 0 ? s*0x8000 : s*0x7fff;
+    }
+    return out;
+  };
+  tell("Sample werden aufbereitet…", 0);
+  await nextTick();
+  const left = toI16(channels[0]);
+  if (!exportAlive(job)) throw EXPORT_ABORT;
+  const right = channelCount > 1 ? toI16(channels[1]) : null;
+  let painted = 0;
+  for (let pos = 0; pos < left.length; pos += chunk){
+    if (!exportAlive(job)) throw EXPORT_ABORT;
+    const end = Math.min(left.length, pos+chunk);
+    let frame;
+    if (channelCount > 1) frame = encoder.encodeBuffer(left.subarray(pos, end), right.subarray(pos, end));
+    else frame = encoder.encodeBuffer(left.subarray(pos, end));
+    if (frame.length) parts.push(frame);
+    const now = performance.now();
+    if (now - painted > 110 || end === left.length){
+      tell("MP3 wird erstellt…", end/left.length); painted = now;
+      await nextTick();
+    }
+  }
+  if (!exportAlive(job)) throw EXPORT_ABORT;
+  const tail = encoder.flush();
+  if (tail.length) parts.push(tail);
+  return new Blob(parts, { type:"audio/mpeg" });
+}
+/* M4A (AAC) geht nur in der nativen App: Browser haben keinen AAC-Encoder.
+   Dem WAV wird dort im Native-Layer in eine M4A-Datei umgewandelt. */
+function nativeM4aAvailable(){ return !!(NativeMedia && NativeMedia.beginAudioEncode); }
+async function nativeM4aFile(name, wavBlob, report){
+  const tell = report || (() => {});
+  const job = exportJob;
+  const started = await NativeMedia.beginAudioEncode({ name });
+  const id = started.id;
+  try{
+    const chunkSize = 256*1024;
+    for (let offset = 0; offset < wavBlob.size; offset += chunkSize){
+      if (!exportAlive(job)){ await cancelNativeEncode(id); throw EXPORT_ABORT; }
+      const bytes = new Uint8Array(await wavBlob.slice(offset, offset+chunkSize).arrayBuffer());
+      await NativeMedia.writeAudioEncodeChunk({ id, offset, data:toBase64(bytes) });
+      tell("Rohdaten an die App uebergeben…", Math.min(1, (offset+chunkSize)/wavBlob.size));
+    }
+    if (!exportAlive(job)){ await cancelNativeEncode(id); throw EXPORT_ABORT; }
+    tell("M4A wird kodiert…", null, true);
+    await NativeMedia.finishAudioEncode({ id, name });
+  }catch(error){
+    if (!exportAlive(job)){ await cancelNativeEncode(id); throw EXPORT_ABORT; }
+    if (NativeMedia.cancelAudioEncode){
+      try{ await NativeMedia.cancelAudioEncode({ id }); }
+      catch(cleanupError){ console.warn("Temporary M4A-Datei konnte nicht entfernt werden:", cleanupError); }
+    }
+    throw error;
+  }
+}
+async function cancelNativeEncode(id){
+  if (!NativeMedia?.cancelAudioEncode) return;
+  try{ await NativeMedia.cancelAudioEncode({ id }); }
+  catch(error){ console.warn("Temporary M4A-Datei konnte nicht entfernt werden:", error); }
+}
 async function importFiles(files){
   if (!state.db.ok){ toast("Speicher nicht verfügbar – Import unmöglich", true); return; }
-  const list = Array.from(files).filter(f => f.type.startsWith("audio/") || /\.(mp3|m4a|aac|ogg|opus|wav|flac)$/i.test(f.name));
-  if (!list.length){ toast("Keine Audiodateien ausgewählt", true); return; }
+  // Erst anhand der Endung prüfen, dann (nachrangig) an der MIME-Art –
+  // Android meldet .m4a z.T. als video/mp4 oder ohne MIME-Typ.
+  const AUDIO_EXT = /\.(mp3|m4a|mp4|aac|ogg|oga|opus|wav|flac|webm)$/i;
+  const looksAudio = f => AUDIO_EXT.test(f.name) || /^audio\//.test(f.type || "") ||
+    (!AUDIO_EXT.test(f.name) && f.type === "video/mp4");
+  const list = Array.from(files).filter(looksAudio);
+  if (!list.length){ toast("Keine Audiodateien ausgewählt – unterstützt: mp3, m4a, aac, ogg, opus, wav, flac, webm", true); return; }
   state.ui.importing = true; state.ui.importTotal = list.length; state.ui.importDone = 0;
   renderCurrent();
   try{
@@ -315,14 +406,12 @@ async function extractChannels(trackId){
     if (buffer.numberOfChannels < 2){
       toast("Diese Datei enthält nur einen Kanal – Stereo-Extraktion ist nicht möglich", true); return;
     }
-    const base = safeFileBase(t.title);
     const labels = buffer.numberOfChannels === 2 ? ["Links", "Rechts"] :
       Array.from({ length:buffer.numberOfChannels }, (_, i) => `Kanal ${i+1}`);
-    const files = labels.map((label, index) => {
-      const mono = wavChannelsToBlob([buffer.getChannelData(index)], buffer.sampleRate);
-      return new File([mono], `${base}_${label}.wav`, { type:"audio/wav" });
-    });
-    openChannelExportSheet(t, files);
+    channelExportData = { base:safeFileBase(t.title),
+      buffers:labels.map((_, index) => buffer.getChannelData(index)),
+      sampleRate:buffer.sampleRate, names:labels };
+    openChannelExportSheet(t);
   }catch(error){
     console.error("Kanäle konnten nicht extrahiert werden:", error);
     toast("Kanäle konnten nicht extrahiert werden: " + (error.message || "Unbekannter Fehler"), true);
@@ -332,27 +421,102 @@ async function extractChannels(trackId){
     }
   }
 }
+const EXPORT_FORMATS = {
+  wav:{ ext:"wav", label:"WAV",  mime:"audio/wav",  desc:"WAV-Audiodatei" },
+  mp3:{ ext:"mp3", label:"MP3",  mime:"audio/mpeg", desc:"MP3-Audiodatei" },
+  m4a:{ ext:"m4a", label:"M4A",  mime:"audio/mp4",  desc:"M4A-Audiodatei" },
+};
 function clearChannelExports(){
-  channelExportUrls.forEach(url => URL.revokeObjectURL(url));
-  channelExportUrls = [];
+  exportJob++;                       // laufende Encodings verwerfen
+  for (const item of channelExportFiles){
+    for (const entry of Object.values(item.formats)){
+      if (entry?.url) URL.revokeObjectURL(entry.url);
+    }
+  }
   channelExportFiles = [];
+  channelExportData = null;
+  channelExportTrack = null;
+  channelExportFormat = "wav";
+  state.ui.exportBusy = null;
 }
-function openChannelExportSheet(t, files){
-  clearChannelExports();
-  channelExportFiles = files;
-  const rows = files.map((file, index) => {
-    const url = URL.createObjectURL(file);
-    channelExportUrls.push(url);
-    const canShare = typeof navigator.share === "function" &&
-      typeof navigator.canShare === "function" && navigator.canShare({ files:[file] });
-    return '<div class="channelExportRow"><div class="rowInfo"><div class="rowTitle">' + esc(file.name) +
-      '</div><div class="rowSub">' + fmtBytes(file.size) + '</div></div>' +
-      '<button class="btn small primary" data-act="save-channel" data-index="' + index + '">⬇ Speichern</button>' +
-      (canShare ? '<button class="btn small" data-act="share-channel" data-index="' + index + '">Teilen</button>' : '') + '</div>';
+/* Fortschritt im Sheet anzeigen: Label + Balken, ratio null = unbestimmt.
+   locked = true, waehrend der System-Speicherdialog laeuft (nicht abbrechbar). */
+function exportStatus(label, ratio, locked){
+  const pct = ratio == null ? null : clamp(Math.round(ratio*100), 0, 100);
+  const prev = state.ui.exportBusy;
+  state.ui.exportBusy = label ? { label, pct, locked:!!locked } : null;
+  if (!label || !prev || prev.label !== label || prev.pct !== pct || prev.locked !== !!locked) renderChannelExportSheet();
+}
+function openChannelExportSheet(t){
+  channelExportTrack = t;
+  channelExportFiles = channelExportData.names.map(() => ({ formats:{} }));
+  renderChannelExportSheet();
+}
+function renderChannelExportSheet(){
+  const d = channelExportData, t = channelExportTrack;
+  if (!d || !t) return;
+  const busy = state.ui.exportBusy;
+  const m4aOn = nativeM4aAvailable();
+  const chips = ["wav", "mp3", "m4a"].map(f => {
+    const off = f === "m4a" && !m4aOn;
+    return '<span class="chip' + (channelExportFormat === f ? ' on' : '') + (off ? ' chipOff' : '') + '"' +
+      (off ? ' title="M4A gibts nur in der nativen BeatClip-App"' : '') +
+      ' data-act="export-format" data-fmt="' + f + '">' + EXPORT_FORMATS[f].label + '</span>';
   }).join("");
+  const rows = d.names.map((name, index) => {
+    const dis = busy ? ' disabled' : '';
+    return '<div class="channelExportRow"><div class="rowInfo"><div class="rowTitle">' +
+      esc(d.base + "_" + name) + '.' + EXPORT_FORMATS[channelExportFormat].ext +
+      '</div><div class="rowSub">Kanal: ' + esc(name) + '</div></div>' +
+      '<button class="btn small primary" data-act="save-channel" data-index="' + index + '"' + dis + '>⬇ Speichern</button>' +
+      '<button class="btn small" data-act="share-channel" data-index="' + index + '"' + dis + '>Teilen</button></div>';
+  }).join("");
+  // Rueckmeldung, solange kodiert/uebertragen wird (dauert bei langen Titeln).
+  const status = busy
+    ? '<div class="exportStatus"><div class="rowTitle"><span class="spin"></span> ' + esc(busy.label) +
+      (busy.pct == null ? '' : ' ' + busy.pct + '%') + '</div>' +
+      (busy.pct == null ? '<div class="progress indet"><i></i></div>'
+                        : '<div class="progress"><i style="width:' + busy.pct + '%"></i></div>') +
+      (busy.locked ? '' : '<div class="exportHint">Das kann bei langen Titeln einen Moment dauern – Schliessen bricht ab.</div>') +
+      '</div>'
+    : "";
   openSheet('<div class="grab"></div><h2>🎚 Kanäle extrahiert</h2>' +
-    '<div class="sub">' + esc(t.title) + ' · jede Datei enthält einen einzelnen Kanal als WAV</div>' +
-    rows + '<div class="sheetbtns"><button class="btn" data-act="sheet-close">Fertig</button></div>', true);
+    '<div class="sub">' + esc(t.title) + ' · ' + d.names.length + ' Mono-Kanal' +
+    (d.names.length > 1 ? "e" : "") + ' – Format waehlen, dann speichern oder teilen</div>' +
+    '<div class="chipRow' + (busy ? ' chipBusy' : '') + '">' + chips + '</div>' +
+    status + rows + '<div class="sheetbtns"><button class="btn" data-act="sheet-close"' +
+    (busy && busy.locked ? ' disabled' : '') + '>Fertig</button></div>', true);
+}
+/* Liefert (und cacht) die Exportdatei eines Kanals im gewaehlten Format.
+   report(label, ratio) uebernimmt die Fortschrittsanzeige im Sheet. */
+async function exportFile(index, report){
+  const d = channelExportData, f = channelExportFormat;
+  const item = channelExportFiles[index];
+  if (!d || !item) return null;
+  if (item.formats[f]) return item.formats[f].file;
+  const meta = EXPORT_FORMATS[f];
+  const name = `${d.base}_${d.names[index]}.${meta.ext}`;
+  const tell = report || (() => {});
+  let file = null;
+  if (f === "wav"){
+    tell("WAV wird erstellt…", 0.5);
+    file = new File([wavChannelsToBlob([d.buffers[index]], d.sampleRate)], name, { type:meta.mime });
+  }else if (f === "mp3"){
+    const blob = await mp3ChannelsToBlob([d.buffers[index]], d.sampleRate, 192, tell);
+    if (!blob){ toast("MP3-Encoder nicht verfuegbar (vendor/lamejs.iife.js fehlt)", true); return null; }
+    file = new File([blob], name, { type:meta.mime });
+  }else if (f === "m4a"){
+    if (!nativeM4aAvailable()){ toast("M4A ist nur in der nativen BeatClip-App verfuegbar", true); return null; }
+    return null; // wird direkt nativ codiert und gespeichert
+  }
+  if (!file) return null;
+  item.formats[f] = { file, url:URL.createObjectURL(file) };
+  return file;
+}
+async function exportUrl(index){
+  const file = await exportFile(index);
+  const item = channelExportFiles[index];
+  return file && item?.formats[channelExportFormat]?.url || null;
 }
 function toBase64(bytes){
   let binary = "";
@@ -362,60 +526,79 @@ function toBase64(bytes){
   return btoa(binary);
 }
 async function saveChannelExport(index){
-  const file = channelExportFiles[index];
-  if (!file){ toast("Exportdatei nicht mehr verfügbar", true); return; }
-  if (NATIVE && NativeMedia?.beginAudioExport && NativeMedia?.writeAudioExportChunk && NativeMedia?.saveAudioExport){
-    let exportId = null;
-    try{
+  if (state.ui.exportBusy) return;
+  const f = channelExportFormat;
+  const meta = EXPORT_FORMATS[f];
+  const d = channelExportData;
+  if (!d) { toast("Exportdatei nicht mehr verfügbar", true); return; }
+  const job = exportJob;
+  const name = `${d.base}_${d.names[index]}.${meta.ext}`;
+  let exportId = null;
+  const dropTemp = async () => {
+    if (!exportId || !NativeMedia?.cancelAudioExport) return;
+    try{ await NativeMedia.cancelAudioExport({ id:exportId }); }
+    catch(cleanupError){ console.error("Temporäre Exportdatei konnte nicht entfernt werden:", cleanupError); }
+  };
+  try{
+    if (f === "m4a"){
+      if (!nativeM4aAvailable()){ toast("M4A ist nur in der nativen BeatClip-App verfuegbar", true); return; }
+      exportStatus("WAV-Zwischendaten werden erstellt…", 0);
+      await nativeM4aFile(name, wavChannelsToBlob([d.buffers[index]], d.sampleRate), exportStatus);
+      toast("Datei gespeichert");
+      return;
+    }
+    const file = await exportFile(index, exportStatus);
+    if (!file){ toast("Exportdatei nicht mehr verfügbar", true); return; }
+    if (NATIVE && NativeMedia?.beginAudioExport && NativeMedia?.writeAudioExportChunk && NativeMedia?.saveAudioExport){
+      if (!exportAlive(job)) throw EXPORT_ABORT;
       const started = await NativeMedia.beginAudioExport({ name:file.name });
       exportId = started.id;
       const chunkSize = 256*1024;
       for (let offset = 0; offset < file.size; offset += chunkSize){
+        if (!exportAlive(job)) throw EXPORT_ABORT;
         const bytes = new Uint8Array(await file.slice(offset, offset+chunkSize).arrayBuffer());
         await NativeMedia.writeAudioExportChunk({ id:exportId, offset, data:toBase64(bytes) });
+        exportStatus("Datei an den Speicherdialog uebergeben…", Math.min(1, (offset+chunkSize)/file.size));
       }
-      await NativeMedia.saveAudioExport({ id:exportId, name:file.name });
+      if (!exportAlive(job)) throw EXPORT_ABORT;
+      exportStatus("Speicherdialog wird geoeffnet…", null, true);
+      await NativeMedia.saveAudioExport({ id:exportId, name:file.name, mime:meta.mime });
       exportId = null;
       toast("Datei gespeichert");
-    }catch(error){
-      if (exportId && NativeMedia.cancelAudioExport){
-        try{ await NativeMedia.cancelAudioExport({ id:exportId }); }
-        catch(cleanupError){ console.error("Temporäre Exportdatei konnte nicht entfernt werden:", cleanupError); }
-      }
-      if (error.code !== "USER_CANCELLED"){
-        console.error("Datei konnte nicht gespeichert werden:", error);
-        toast("Datei konnte nicht gespeichert werden: " + (error.message || "Unbekannter Fehler"), true);
-      }
+      return;
     }
-    return;
-  }
-  if (window.showSaveFilePicker){
-    try{
+    if (window.showSaveFilePicker){
+      exportStatus("Speicherdialog wird geoeffnet…", null, true);
       const handle = await window.showSaveFilePicker({
         suggestedName:file.name,
-        types:[{ description:"WAV-Audiodatei", accept:{ "audio/wav":[".wav"] } }],
+        types:[{ description:meta.desc, accept:{ [meta.mime]:["."+meta.ext] } }],
       });
+      exportStatus("Datei wird geschrieben…", null, true);
       const writable = await handle.createWritable();
       await writable.write(file);
       await writable.close();
       toast("Datei gespeichert");
-    }catch(error){
-      if (error.name !== "AbortError"){
-        console.error("Datei konnte nicht gespeichert werden:", error);
-        toast("Datei konnte nicht gespeichert werden: " + (error.message || "Unbekannter Fehler"), true);
-      }
+      return;
     }
-    return;
+    const url = await exportUrl(index);
+    if (!url){ toast("Exportdatei nicht mehr verfügbar", true); return; }
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = file.name;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    toast("Download gestartet");
+  }catch(error){
+    await dropTemp();
+    if (error === EXPORT_ABORT){ toast("Export abgebrochen"); return; }
+    if (error?.code !== "USER_CANCELLED" && error?.name !== "AbortError"){
+      console.error("Datei konnte nicht gespeichert werden:", error);
+      toast("Datei konnte nicht gespeichert werden: " + (error?.message || "Unbekannter Fehler"), true);
+    }
+  }finally{
+    if (exportAlive(job)) exportStatus(null);
   }
-  const url = channelExportUrls[index];
-  if (!url){ toast("Exportdatei nicht mehr verfügbar", true); return; }
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = file.name;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  toast("Download gestartet");
 }
 /* Demo-Titel (synthetische WAVs), falls keine echten Dateien griffbereit */
 async function importDemoTracks(){
@@ -752,8 +935,8 @@ function nativeStopSession(){
 }
 function mimeFor(name){
   const ext = (String(name).split(".").pop() || "").toLowerCase();
-  return { mp3:"audio/mpeg", m4a:"audio/mp4", aac:"audio/aac", ogg:"audio/ogg",
-           opus:"audio/ogg", wav:"audio/wav", flac:"audio/flac", webm:"audio/webm" }[ext] || "application/octet-stream";
+  return { mp3:"audio/mpeg", m4a:"audio/mp4", mp4:"audio/mp4", aac:"audio/aac", ogg:"audio/ogg",
+           oga:"audio/ogg", opus:"audio/ogg", wav:"audio/wav", flac:"audio/flac", webm:"audio/webm" }[ext] || "application/octet-stream";
 }
 /* Dateien uebernehmen, die aus einer anderen App nach BeatClip geteilt wurden */
 async function importSharedFiles(){
@@ -1130,7 +1313,7 @@ function renderSet(){
     '<div class="sectionHeading">' + (NATIVE ? (NATIVE_OS === "iOS" ? "Wiedergabe & Now Playing" : "Wiedergabe & Benachrichtigung") : "Installation") + ' <span class="line"></span></div>' +
     '<div class="panel">' +
     (NATIVE
-      ? '<div class="kv"><span class="k">App-Version</span><span class="v" style="font-size:13px">NATIVE ' + NATIVE_OS + '-App</span></div>' +
+      ? '<div class="kv"><span class="k">App-Version</span><span class="v" style="font-size:13px">' + NATIVE_OS + '-App v' + APP_VER + ' (Build ' + APP_BUILD + ')</span></div>' +
         '<div class="sep"></div>' +
         '<div class="kv"><span class="k">' + (NATIVE_OS === "iOS" ? "Now-Playing-Status" : "Medien-Benachrichtigung") + '</span><button class="btn small" data-act="media-status">pruefen</button></span></div>' +
         '<div class="kv" style="font-size:12px;opacity:.75"><span class="k">' + (NATIVE_OS === "iOS"
@@ -1428,16 +1611,18 @@ document.addEventListener("pointermove", e => {
   if (!d || e.pointerId !== d.pointerId) return;
   if (!d.moved && Math.hypot(e.clientX-d.startX,e.clientY-d.startY) < 6) return;
   d.moved = true;
-  const row = document.elementFromPoint(e.clientX,e.clientY)?.closest(".plTrackRow");
-  d.targetItem = row && row.closest("#s-pl") ? row.dataset.item : null;
-  d.after = false;
+  const pointTarget = document.elementFromPoint(e.clientX,e.clientY);
+  const panel = pointTarget?.closest("#s-pl .panel");
+  const rows = panel ? Array.from(panel.querySelectorAll(".plTrackRow")) : [];
+  const row = rows.find(entry => e.clientY <
+    entry.getBoundingClientRect().top + entry.getBoundingClientRect().height/2) || rows[rows.length-1];
+  d.targetItem = row ? row.dataset.item : null;
+  d.after = !!row && row === rows[rows.length-1] &&
+    e.clientY >= row.getBoundingClientRect().top + row.getBoundingClientRect().height/2;
   clearPlaylistDropTarget();
   const source = $(`#s-pl .plTrackRow[data-item="${d.itemId}"]`);
   if (source) source.classList.add("isDragging");
-  if (row && d.targetItem){
-    d.after = e.clientY >= row.getBoundingClientRect().top + row.offsetHeight/2;
-    row.classList.add(d.after ? "dropAfter" : "dropBefore");
-  }
+  if (row && d.targetItem) row.classList.add(d.after ? "dropAfter" : "dropBefore");
 });
 document.addEventListener("pointerup", e => {
   if (state.ui.reorder?.pointerId !== e.pointerId) return;
@@ -1575,7 +1760,7 @@ function renderMini(){
 function renderAbout(){
   $("#s-about").innerHTML = '<div class="pad" style="padding-top:6px">' +
     '<div class="aboutBlock"><div class="logoTile">🎧</div>' +
-    '<div class="aboutTitle">BeatClip</div><div class="aboutVer">v1.0 · ' + (NATIVE ? NATIVE_OS + '-App' : 'PWA (Android + iOS)') + ' · Offline</div>' +
+    '<div class="aboutTitle">BeatClip</div><div class="aboutVer">v' + APP_VER + ' · Build ' + APP_BUILD + ' · ' + (NATIVE ? NATIVE_OS + '-App' : 'PWA (Android + iOS)') + ' · Offline</div>' +
     '<div class="aboutText">Spielt lokal gespeicherte Audiodateien. Jeder Titel in einer ' +
     'Playlist hat eigene Start- und Endmarken - abgespielt wird nur der Abschnitt dazwischen. ' +
     'Musik geht per Bluetooth an deinen Lautsprecher. Mikrofonaufnahmen und Kanal-Export sind ebenfalls möglich.</div></div>' +
@@ -1604,7 +1789,7 @@ function renderAbout(){
     '</div>' +
     '<div class="infoBlock">Alle Dateien und Schnitte bleiben ausschliesslich lokal auf diesem Geraet ' +
     '(IndexedDB, optionale persistente Speicherung). Kein Konto, keine Netzwerkuebertragung. ' +
-    'Aufnahmen werden erst nach dem Stoppen in der Bibliothek gespeichert; Stereo-Kanäle lassen sich als WAV-Dateien herunterladen.</div>' +
+    'Aufnahmen werden erst nach dem Stoppen in der Bibliothek gespeichert; Stereo-Kanäle lassen sich als WAV, MP3 oder (in der nativen App) als M4A speichern.</div>' +
     '</div>';
 }
 
@@ -1655,10 +1840,33 @@ async function handle(act, el){
     case "lib-menu": state.ui.pickerTrack = ds.t; openTrackMenu(ds.t, null, null); break;
     case "extract-channels": closeSheet(); await extractChannels(ds.t); break;
     case "share-channel": {
-      const file = channelExportFiles[Number(ds.index)];
-      if (!file || typeof navigator.share !== "function"){ toast("Teilen wird auf diesem Gerät nicht unterstützt", true); break; }
-      try{ await navigator.share({ files:[file], title:file.name }); }
-      catch(error){ if (error.name !== "AbortError") { console.error("Datei konnte nicht geteilt werden:", error); toast("Datei konnte nicht geteilt werden: " + error.message, true); } }
+      if (state.ui.exportBusy) break;
+      if (channelExportFormat === "m4a"){ toast("M4A nur ueber \u2B07 Speichern sichern \u2013 Teilen geht hier mit WAV oder MP3", true); break; }
+      const job = exportJob;
+      try{
+        const file = await exportFile(Number(ds.index), exportStatus);
+        if (!file){ toast("Exportdatei nicht mehr verfuegbar", true); break; }
+        if (!exportAlive(job)) break;
+        if (typeof navigator.share !== "function"){ toast("Teilen wird auf diesem Gerät nicht unterstützt", true); break; }
+        exportStatus("Teilen wird vorbereitet…", null);
+        await navigator.share({ files:[file], title:file.name });
+      }catch(error){
+        if (error !== EXPORT_ABORT && error.name !== "AbortError"){
+          console.error("Datei konnte nicht geteilt werden:", error);
+          toast("Datei konnte nicht geteilt werden:" + error.message, true);
+        }
+      }finally{
+        if (exportAlive(job)) exportStatus(null);
+      }
+      break;
+    }
+    case "export-format": {
+      if (state.ui.exportBusy) break;
+      const f = ds.fmt;
+      if (!EXPORT_FORMATS[f]) break;
+      if (f === "m4a" && !nativeM4aAvailable()){ toast("M4A ist nur in der nativen BeatClip-App verfuegbar", true); break; }
+      channelExportFormat = f;
+      renderChannelExportSheet();
       break;
     }
     case "save-channel": await saveChannelExport(Number(ds.index)); break;

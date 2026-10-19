@@ -34,6 +34,21 @@ Solange du denselben Schlüssel verwendest, ist ein Update ohne Datenverlust mö
 (`install -r`). Für Google Play musst du einen **eigenen** Release-Schlüssel erzeugen –
 dann vorher die lokale APK deinstallieren.
 
+**Wichtig:** Debug- und Release-APK haben **unterschiedliche Signaturen**. Ist die
+Debug-Version installiert, lehnt Android die Release-APK stillschweigend ab
+(`INSTALL_FAILED_UPDATE_INCOMPATIBLE`) – die alte Fassung bleibt dann in Benutzung,
+obwohl ein neueres APK gebaut wurde. Erst deinstallieren
+(`adb uninstall com.beatclip.app`), danach die APK installieren.
+
+### Prüfen, welcher Stand auf dem Handy läuft
+Einstellungen → **App-Version** zeigt z. B. `Android-App v1.1 (Build 2)`, ebenso die
+„Über“-Seite. Zu jedem Build müssen `versionCode`/`versionName` in
+[`android/app/build.gradle`](android/app/build.gradle) und `APP_VER`/`APP_BUILD` in
+[`app/app.js`](app/app.js) zusammen hochgezogen werden – sonst ist nicht erkennbar,
+ob das Gerät wirklich die neue Fassung nutzt. Der Capacitor-Asset-Server liefert Web-
+Dateien mit `Cache-Control: no-cache`, ein veralteter WebView-Cache ist bei korrektem
+Installationsvorgang also ausgeschlossen.
+
 ---
 
 ## 2. Bauen / neu bauen
@@ -99,7 +114,7 @@ Platz steht unter Einstellungen → „Speicher“.
 
 ### Aufnehmen und Kanäle exportieren
 - Bibliothek → **Aufnahme** startet die Mikrofonaufnahme; **Aufnahme beenden** speichert sie automatisch in der lokalen Bibliothek. Android fragt nach Mikrofonzugriff.
-- Im Menü eines Titels **Stereo-Kanäle extrahieren** wählen und bei der gewünschten Mono-WAV-Datei auf **Speichern** tippen. Android öffnet den Systemdialog zur Speicherortauswahl (standardmäßig Downloads). Bei Mehrkanal-Audio wird jeder Kanal exportiert; Mono-Dateien sind nicht teilbar.
+- Im Menü eines Titels **Stereo-Kanäle extrahieren** wählen, dort das Format (Chips **WAV / MP3 / M4A**) auswählen und bei der gewünschten Mono-Datei auf **Speichern** tippen. Android öffnet den Systemdialog zur Speicherortauswahl (standardmäßig Downloads); M4A wird dort nativ (MediaCodec/MediaMuxer) als AAC kodiert. Das Sheet zeigt währenddessen Fortschritt (Spinner, Phasentext, Balken) – **Sheet schließen bricht ab** und löscht die temporären Dateien. Bei Mehrkanal-Audio wird jeder Kanal exportiert; Mono-Dateien sind nicht teilbar.
 
 ### Schnitt (Start/Ende) unverändert
 Wie im Prototyp: Playlist → Titel → *Schnitt* → Griffe **S**/**E** auf der Waveform,

@@ -70,7 +70,7 @@ Die App benutzt ein einziges `<audio>`-Element → die Wiedergabe folgt der
 - Ende erreicht → Auto-Transition zum nächsten Titel (oder Repeat/Sleep wie eingestellt).
 - Schnitte werden je Playlist-Eintrag in IndexedDB gespeichert (Gerät bleibt Datenhalter).
 - **Aufnahme:** Bibliothek → „Aufnahme“ startet eine Mikrofonaufnahme. Beim Beenden wird sie automatisch als Audiodatei in der lokalen Bibliothek gespeichert.
-- **Stereo-Kanäle exportieren:** Im Menü eines Titels „Stereo-Kanäle extrahieren“ wählen. „Speichern“ öffnet den Speicher-/Download-Dialog des Geräts. Links und rechts werden als separate Mono-WAV-Dateien angeboten; auf Geräten mit mehr Kanälen wird jeder Kanal einzeln exportiert. Mono-Dateien lassen sich nicht aufteilen.
+- **Stereo-Kanäle exportieren:** Im Menü eines Titels „Stereo-Kanäle extrahieren“ wählen. Links und rechts werden als separate Mono-Dateien angeboten; auf Geräten mit mehr Kanälen wird jeder Kanal einzeln exportiert. Mono-Dateien lassen sich nicht aufteilen. Über die Chips **WAV / MP3 / M4A** unter dem Titel wird das Zielformat gewählt (MP3 mit 192 kbps, im Browser mit lamejs kodiert). „Speichern“ öffnet den Speicher-/Download-Dialog des Geräts. **M4A (AAC)** ist nur in der nativen BeatClip-App verfügbar – dort wandelt das Betriebssystem das Material im Native-Layer um. Während des Erzeugens zeigt das Sheet Spinner, Phasentext und Fortschrittsbalken (MP3 in Prozent, M4A mit „Rohdaten uebergeben…“ / „M4A wird kodiert…“); Speichern, Teilen und die Formatchips sind solange gesperrt. Sheet schließen bricht den Lauf ab und räumt die temporären Dateien der App auf.
 
 ## Formate
 

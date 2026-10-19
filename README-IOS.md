@@ -101,7 +101,7 @@ Alle Dateien liegen lokal im App-Sandbox (IndexedDB); keine Uploads, kein Konto.
 
 ### Aufnehmen und Kanäle exportieren
 - Bibliothek → **Aufnahme** startet die Mikrofonaufnahme; **Aufnahme beenden** speichert sie automatisch in der lokalen Bibliothek. iOS fragt nach Mikrofonzugriff.
-- Im Menü eines Titels **Stereo-Kanäle extrahieren** wählen und bei der gewünschten Mono-WAV-Datei auf **Speichern** tippen, um den iOS-Dateiexport mit Speicherortauswahl zu öffnen. Bei Mehrkanal-Audio wird jeder Kanal exportiert; Mono-Dateien sind nicht teilbar.
+- Im Menü eines Titels **Stereo-Kanäle extrahieren** wählen, dort das Format (Chips **WAV / MP3 / M4A**) auswählen und bei der gewünschten Mono-Datei auf **Speichern** tippen, um den iOS-Dateiexport mit Speicherortauswahl zu öffnen; M4A wird dort nativ (AVAudioFile/AAC) kodiert. Das Sheet zeigt währenddessen Fortschritt (Spinner, Phasentext, Balken) – **Sheet schließen bricht ab** und löscht die temporären Dateien. Bei Mehrkanal-Audio wird jeder Kanal exportiert; Mono-Dateien sind nicht teilbar.
 
 ### Schnitt (Start/Ende) unverändert
 Wie gehabt: Playlist → Titel → *Schnitt* → Griffe **S**/**E** auf der Waveform.

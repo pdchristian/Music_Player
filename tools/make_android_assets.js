@@ -33,8 +33,10 @@ for (const d of DENSITIES){
     png(d.launcher, d.launcher, drawIcon(d.launcher, { rounded: true, radius: d.launcher/2 })));
 
   // Adaptive Icons: weisses Notensymbol in der Safe-Area, Hintergrund = Verlauf-Drawable
+  // (Layer selbst ist transparent, damit ic_launcher_bg.xml – der WOL-Verlauf – durchscheint
+  //  und der monochrome Layer fuer Theme-Icons funktionieren kann)
   write(path.join(res, `mipmap-${d.dir}`, "ic_launcher_foreground.png"),
-    png(d.adaptive, d.adaptive, drawIcon(d.adaptive, { rounded: false, radius: 0, pad: Math.round(d.adaptive*0.26) })));
+    png(d.adaptive, d.adaptive, drawIcon(d.adaptive, { rounded: false, radius: 0, pad: Math.round(d.adaptive*0.26), background: "transparent" })));
 
   // Splash (Hoch- und Querformat)
   const [sw, sh] = d.splash;

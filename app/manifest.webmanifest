@@ -20,7 +20,7 @@
   "file_handlers": [
     {
       "action": "./index.html",
-      "accept": { "audio/*": [".mp3", ".m4a", ".aac", ".ogg", ".opus", ".wav", ".flac"] }
+      "accept": { "audio/*": [".mp3", ".m4a", ".mp4", ".aac", ".ogg", ".oga", ".opus", ".wav", ".flac", ".webm"] }
     }
   ],
   "shortcuts": [

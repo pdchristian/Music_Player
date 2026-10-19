@@ -34,6 +34,10 @@ public class BeatClipMediaPlugin: CAPPlugin, CAPBridgedPlugin, UIDocumentPickerD
         CAPPluginMethod(name: "writeAudioExportChunk", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "saveAudioExport", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "cancelAudioExport", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "beginAudioEncode", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "writeAudioEncodeChunk", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "finishAudioEncode", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "cancelAudioEncode", returnType: CAPPluginReturnPromise),
     ]
 
     private static let chunk = 768 * 1024          // Base64 in handlichen Stuecken
@@ -42,6 +46,7 @@ public class BeatClipMediaPlugin: CAPPlugin, CAPBridgedPlugin, UIDocumentPickerD
     private var playing = false
     private var commandsRegistered = false
     private var exportFiles: [String: URL] = [:]
+    private var encodeWavFiles: [String: URL] = [:]
     private var pendingExportCalls: [String: CAPPluginCall] = [:]
     private var pendingExportIds: [ObjectIdentifier: String] = [:]
 
@@ -271,6 +276,11 @@ public class BeatClipMediaPlugin: CAPPlugin, CAPBridgedPlugin, UIDocumentPickerD
             call.reject("Exportdatei fehlt oder ist leer")
             return
         }
+        presentExport(call, id: id, url: url, name: name)
+    }
+
+    /// Oeffnet den iOS-Dateiexport fuer eine fertige Datei (WAV oder M4A).
+    private func presentExport(_ call: CAPPluginCall, id: String, url: URL, name: String) {
         let picker = UIDocumentPickerViewController(url: url, in: .exportToService)
         picker.delegate = self
         picker.shouldShowFileExtensions = true
@@ -288,6 +298,135 @@ public class BeatClipMediaPlugin: CAPPlugin, CAPBridgedPlugin, UIDocumentPickerD
         }
     }
 
+    // MARK: – M4A-Encoding (PCM/WAV -> AAC in MP4-Container)
+
+    @objc func beginAudioEncode(_ call: CAPPluginCall) {
+        guard let name = call.getString("name"), !name.isEmpty,
+              !name.contains("/"), !name.contains("\\") else {
+            call.reject("Ungueltiger Dateiname")
+            return
+        }
+        let id = UUID().uuidString
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(id, isDirectory: true)
+        // Zwischendatei enthaelt WAV – bewusst mit .wav-Endung, egal wie die
+        // spaetere M4A-Ausgabe heissen soll.
+        let url = directory.appendingPathComponent("source.wav")
+        do {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        } catch {
+            call.reject("Encodeordner konnte nicht angelegt werden: \(error.localizedDescription)")
+            return
+        }
+        guard FileManager.default.createFile(atPath: url.path, contents: Data()) else {
+            try? FileManager.default.removeItem(at: directory)
+            call.reject("Encodedatei konnte nicht angelegt werden")
+            return
+        }
+        encodeWavFiles[id] = url
+        call.resolve(["id": id])
+    }
+
+    @objc func writeAudioEncodeChunk(_ call: CAPPluginCall) {
+        guard let id = call.getString("id"), let url = encodeWavFiles[id],
+              let encoded = call.getString("data"), let offset = call.getInt("offset"),
+              offset >= 0, let data = Data(base64Encoded: encoded) else {
+            call.reject("Ungueltiger Encodeblock")
+            return
+        }
+        do {
+            let handle = try FileHandle(forWritingTo: url)
+            defer { try? handle.close() }
+            try handle.seek(toOffset: UInt64(offset))
+            try handle.write(contentsOf: data)
+            call.resolve()
+        } catch {
+            call.reject("Encodeblock konnte nicht geschrieben werden: \(error.localizedDescription)")
+        }
+    }
+
+    @objc func cancelAudioEncode(_ call: CAPPluginCall) {
+        guard let id = call.getString("id") else {
+            call.reject("Encodekennung fehlt")
+            return
+        }
+        if let url = encodeWavFiles.removeValue(forKey: id) {
+            try? FileManager.default.removeItem(at: url.deletingLastPathComponent())
+        }
+        call.resolve()
+    }
+
+    @objc func finishAudioEncode(_ call: CAPPluginCall) {
+        guard let id = call.getString("id"), let wavUrl = encodeWavFiles.removeValue(forKey: id),
+              let name = call.getString("name"), fileSize(wavUrl.path) > 44 else {
+            call.reject("Encodedatei fehlt oder ist zu kurz")
+            return
+        }
+        let directory = wavUrl.deletingLastPathComponent()
+        let base = ((name as NSString).deletingPathExtension)
+        let safeBase = (base.isEmpty ? "BeatClip" : base)
+        let m4aUrl = directory.appendingPathComponent(safeBase + ".m4a")
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self else { return }
+            Self.encodeWav(wavUrl, to: m4aUrl) { error in
+                try? FileManager.default.removeItem(at: wavUrl)
+                if let error {
+                    try? FileManager.default.removeItem(at: directory)
+                    call.reject("M4A-Encoding fehlgeschlagen: \(error.localizedDescription)")
+                    return
+                }
+                guard self.fileSize(m4aUrl.path) > 0 else {
+                    try? FileManager.default.removeItem(at: directory)
+                    call.reject("M4A-Encoding fehlgeschlagen: keine Ausgabedatei")
+                    return
+                }
+                let newId = UUID().uuidString
+                self.exportFiles[newId] = m4aUrl
+                self.presentExport(call, id: newId, url: m4aUrl, name: m4aUrl.lastPathComponent)
+            }
+        }
+    }
+
+    /// Wandelt eine (unkomprimierte) WAV-Datei per AVAudioFile in AAC/M4A um.
+    private static func encodeWav(_ wavUrl: URL, to m4aUrl: URL, completion: @escaping (Error?) -> Void) {
+        do {
+            let reader = try AVAudioFile(forReading: wavUrl, commonFormat: .pcmFormatFloat32, interleaved: false)
+            let format = reader.processingFormat
+            let channels = Int(format.channelCount)
+            let sampleRate = format.sampleRate
+            guard channels > 0, sampleRate > 0, reader.length > 0 else {
+                completion(NSError(domain: "BeatClipM4aEncode", code: 3,
+                    userInfo: [NSLocalizedDescriptionKey: "Ungueltiges WAV-Format"]))
+                return
+            }
+            let bitRate = max(96_000, min(320_000, Int(Double(channels) * sampleRate * 16 * 0.4)))
+            let settings: [String: Any] = [
+                AVFormatIDKey: kAudioFormatMPEG4AAC,
+                AVSampleRateKey: sampleRate,
+                AVNumberOfChannelsKey: channels,
+                AVEncoderBitRateKey: bitRate,
+            ]
+            var writer: AVAudioFile? = try AVAudioFile(forWriting: m4aUrl, settings: settings,
+                                                      commonFormat: .pcmFormatFloat32,
+                                                      interleaved: false)
+            guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 4096) else {
+                writer = nil
+                completion(NSError(domain: "BeatClipM4aEncode", code: 6,
+                    userInfo: [NSLocalizedDescriptionKey: "Audio-Puffer nicht verfuegbar"]))
+                return
+            }
+            while reader.currentFrame < reader.length {
+                buffer.frameLength = 0
+                try reader.read(into: buffer)
+                if buffer.frameLength == 0 { break }
+                try writer?.write(from: buffer)
+            }
+            writer = nil   // schliesst die Datei und schreibt den moov-Block
+            completion(nil)
+        } catch {
+            completion(error)
+        }
+    }
+
     @objc func cancelAudioExport(_ call: CAPPluginCall) {
         guard let id = call.getString("id") else {
             call.reject("Exportkennung fehlt")
@@ -297,9 +436,6 @@ public class BeatClipMediaPlugin: CAPPlugin, CAPBridgedPlugin, UIDocumentPickerD
             try? FileManager.default.removeItem(at: url.deletingLastPathComponent())
         }
         pendingExportCalls.removeValue(forKey: id)
-        if let url = exportFiles.removeValue(forKey: id) {
-            try? FileManager.default.removeItem(at: url.deletingLastPathComponent())
-        }
         call.resolve()
     }
 
