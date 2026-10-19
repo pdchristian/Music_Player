@@ -1,0 +1,4 @@
+
+module BeatclipMedia.__Swift {
+  exclude header "BeatclipMedia-Swift.h"
+}

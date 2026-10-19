@@ -1,0 +1,44 @@
+{
+  "/Users/cp/Documents/Python/Music_Player/node_modules/@capacitor/ios/Capacitor/Capacitor/Data+Capacitor.swift" : {
+    "const-values" : "/Users/cp/Documents/Python/Music_Player/build_ios/DerivedData/Build/Intermediates.noindex/Pods.build/Debug-iphonesimulator/Capacitor.build/Objects-normal/arm64/Data+Capacitor.swiftconstvalues",
+    "dependencies" : "/Users/cp/Documents/Python/Music_Player/build_ios/DerivedData/Build/Intermediates.noindex/Pods.build/Debug-iphonesimulator/Capacitor.build/Objects-normal/arm64/Data+Capacitor.d",
+    "diagnostics" : "/Users/cp/Documents/Python/Music_Player/build_ios/DerivedData/Build/Intermediates.noindex/Pods.build/Debug-iphonesimulator/Capacitor.build/Objects-normal/arm64/Data+Capacitor.dia",
+    "object" : "/Users/cp/Documents/Python/Music_Player/build_ios/DerivedData/Build/Intermediates.noindex/Pods.build/Debug-iphonesimulator/Capacitor.build/Objects-normal/arm64/Data+Capacitor.o",
+    "swift-dependencies" : "/Users/cp/Documents/Python/Music_Player/build_ios/DerivedData/Build/Intermediates.noindex/Pods.build/Debug-iphonesimulator/Capacitor.build/Objects-normal/arm64/Data+Capacitor.swiftdeps"
+  },
+  "/Users/cp/Documents/Python/Music_Player/node_modules/@capacitor/ios/Capacitor/Capacitor/DocLinks.swift" : {
+    "const-values" : "/Users/cp/Documents/Python/Music_Player/build_ios/DerivedData/Build/Intermediates.noindex/Pods.build/Debug-iphonesimulator/Capacitor.build/Objects-normal/arm64/DocLinks.swiftconstvalues",
+    "dependencies" : "/Users/cp/Documents/Python/Music_Player/build_ios/DerivedData/Build/Intermediates.noindex/Pods.build/Debug-iphonesimulator/Capacitor.build/Objects-normal/arm64/DocLinks.d",
+    "diagnostics" : "/Users/cp/Documents/Python/Music_Player/build_ios/DerivedData/Build/Intermediates.noindex/Pods.build/Debug-iphonesimulator/Capacitor.build/Objects-normal/arm64/DocLinks.dia",
+    "object" : "/Users/cp/Documents/Python/Music_Player/build_ios/DerivedData/Build/Intermediates.noindex/Pods.build/Debug-iphonesimulator/Capacitor.build/Objects-normal/arm64/DocLinks.o",
+    "swift-dependencies" : "/Users/cp/Documents/Python/Music_Player/build_ios/DerivedData/Build/Intermediates.noindex/Pods.build/Debug-iphonesimulator/Capacitor.build/Objects-normal/arm64/DocLinks.swiftdeps"
+  },
+  "/Users/cp/Documents/Python/Music_Player/node_modules/@capacitor/ios/Capacitor/Capacitor/JS.swift" : {
+    "const-values" : "/Users/cp/Documents/Python/Music_Player/build_ios/DerivedData/Build/Intermediates.noindex/Pods.build/Debug-iphonesimulator/Capacitor.build/Objects-normal/arm64/JS.swiftconstvalues",
+    "dependencies" : "/Users/cp/Documents/Python/Music_Player/build_ios/DerivedData/Build/Intermediates.noindex/Pods.build/Debug-iphonesimulator/Capacitor.build/Objects-normal/arm64/JS.d",
+    "diagnostics" : "/Users/cp/Documents/Python/Music_Player/build_ios/DerivedData/Build/Intermediates.noindex/Pods.build/Debug-iphonesimulator/Capacitor.build/Objects-normal/arm64/JS.dia",
+    "object" : "/Users/cp/Documents/Python/Music_Player/build_ios/DerivedData/Build/Intermediates.noindex/Pods.build/Debug-iphonesimulator/Capacitor.build/Objects-normal/arm64/JS.o",
+    "swift-dependencies" : "/Users/cp/Documents/Python/Music_Player/build_ios/DerivedData/Build/Intermediates.noindex/Pods.build/Debug-iphonesimulator/Capacitor.build/Objects-normal/arm64/JS.swiftdeps"
+  },
+  "/Users/cp/Documents/Python/Music_Player/node_modules/@capacitor/ios/Capacitor/Capacitor/JSExport.swift" : {
+    "const-values" : "/Users/cp/Documents/Python/Music_Player/build_ios/DerivedData/Build/Intermediates.noindex/Pods.build/Debug-iphonesimulator/Capacitor.build/Objects-normal/arm64/JSExport.swiftconstvalues",
+    "dependencies" : "/Users/cp/Documents/Python/Music_Player/build_ios/DerivedData/Build/Intermediates.noindex/Pods.build/Debug-iphonesimulator/Capacitor.build/Objects-normal/arm64/JSExport.d",
+    "diagnostics" : "/Users/cp/Documents/Python/Music_Player/build_ios/DerivedData/Build/Intermediates.noindex/Pods.build/Debug-iphonesimulator/Capacitor.build/Objects-normal/arm64/JSExport.dia",
+    "object" : "/Users/cp/Documents/Python/Music_Player/build_ios/DerivedData/Build/Intermediates.noindex/Pods.build/Debug-iphonesimulator/Capacitor.build/Objects-normal/arm64/JSExport.o",
+    "swift-dependencies" : "/Users/cp/Documents/Python/Music_Player/build_ios/DerivedData/Build/Intermediates.noindex/Pods.build/Debug-iphonesimulator/Capacitor.build/Objects-normal/arm64/JSExport.swiftdeps"
+  },
+  "/Users/cp/Documents/Python/Music_Player/node_modules/@capacitor/ios/Capacitor/Capacitor/JSTypes.swift" : {
+    "const-values" : "/Users/cp/Documents/Python/Music_Player/build_ios/DerivedData/Build/Intermediates.noindex/Pods.build/Debug-iphonesimulator/Capacitor.build/Objects-normal/arm64/JSTypes.swiftconstvalues",
+    "dependencies" : "/Users/cp/Documents/Python/Music_Player/build_ios/DerivedData/Build/Intermediates.noindex/Pods.build/Debug-iphonesimulator/Capacitor.build/Objects-normal/arm64/JSTypes.d",
+    "diagnostics" : "/Users/cp/Documents/Python/Music_Player/build_ios/DerivedData/Build/Intermediates.noindex/Pods.build/Debug-iphonesimulator/Capacitor.build/Objects-normal/arm64/JSTypes.dia",
+    "object" : "/Users/cp/Documents/Python/Music_Player/build_ios/DerivedData/Build/Intermediates.noindex/Pods.build/Debug-iphonesimulator/Capacitor.build/Objects-normal/arm64/JSTypes.o",
+    "swift-dependencies" : "/Users/cp/Documents/Python/Music_Player/build_ios/DerivedData/Build/Intermediates.noindex/Pods.build/Debug-iphonesimulator/Capacitor.build/Objects-normal/arm64/JSTypes.swiftdeps"
+  },
+  "/Users/cp/Documents/Python/Music_Player/node_modules/@capacitor/ios/Capacitor/Capacitor/Plugins/HttpRequestHandler.swift" : {
+    "const-values" : "/Users/cp/Documents/Python/Music_Player/build_ios/DerivedData/Build/Intermediates.noindex/Pods.build/Debug-iphonesimulator/Capacitor.build/Objects-normal/arm64/HttpRequestHandler.swiftconstvalues",
+    "dependencies" : "/Users/cp/Documents/Python/Music_Player/build_ios/DerivedData/Build/Intermediates.noindex/Pods.build/Debug-iphonesimulator/Capacitor.build/Objects-normal/arm64/HttpRequestHandler.d",
+    "diagnostics" : "/Users/cp/Documents/Python/Music_Player/build_ios/DerivedData/Build/Intermediates.noindex/Pods.build/Debug-iphonesimulator/Capacitor.build/Objects-normal/arm64/HttpRequestHandler.dia",
+    "object" : "/Users/cp/Documents/Python/Music_Player/build_ios/DerivedData/Build/Intermediates.noindex/Pods.build/Debug-iphonesimulator/Capacitor.build/Objects-normal/arm64/HttpRequestHandler.o",
+    "swift-dependencies" : "/Users/cp/Documents/Python/Music_Player/build_ios/DerivedData/Build/Intermediates.noindex/Pods.build/Debug-iphonesimulator/Capacitor.build/Objects-normal/arm64/HttpRequestHandler.swiftdeps"
+  }
+}

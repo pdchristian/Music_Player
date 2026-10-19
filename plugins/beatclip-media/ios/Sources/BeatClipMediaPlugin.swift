@@ -414,7 +414,7 @@ public class BeatClipMediaPlugin: CAPPlugin, CAPBridgedPlugin, UIDocumentPickerD
                     userInfo: [NSLocalizedDescriptionKey: "Audio-Puffer nicht verfuegbar"]))
                 return
             }
-            while reader.currentFrame < reader.length {
+            while reader.framePosition < reader.length {
                 buffer.frameLength = 0
                 try reader.read(into: buffer)
                 if buffer.frameLength == 0 { break }

@@ -1,0 +1,23 @@
+{
+  "version": 0,
+  "use-external-names": false,
+  "case-sensitive": false,
+  "roots": [{
+    "type": "directory",
+    "name": "/Users/cp/Documents/Python/Music_Player/build_ios/DerivedData/Build/Products/Debug-iphonesimulator/BeatclipMedia/BeatclipMedia.framework/Modules",
+    "contents": [{
+      "type": "file",
+      "name": "module.modulemap",
+      "external-contents": "/Users/cp/Documents/Python/Music_Player/build_ios/DerivedData/Build/Intermediates.noindex/Pods.build/Debug-iphonesimulator/BeatclipMedia.build/unextended-module.modulemap",
+    }]
+    },
+    {
+    "type": "directory",
+    "name": "/Users/cp/Documents/Python/Music_Player/build_ios/DerivedData/Build/Products/Debug-iphonesimulator/BeatclipMedia/BeatclipMedia.framework/Headers",
+    "contents": [{
+      "type": "file",
+      "name": "BeatclipMedia-Swift.h",
+      "external-contents": "/Users/cp/Documents/Python/Music_Player/build_ios/DerivedData/Build/Intermediates.noindex/Pods.build/Debug-iphonesimulator/BeatclipMedia.build/unextended-interface-header.h",
+    }]
+  }]
+}

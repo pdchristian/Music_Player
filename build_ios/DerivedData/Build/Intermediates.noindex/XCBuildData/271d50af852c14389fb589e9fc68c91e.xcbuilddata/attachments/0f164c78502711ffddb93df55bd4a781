@@ -1,0 +1,4 @@
+
+module BeatclipMedia.Swift {
+  header "BeatclipMedia-Swift.h"
+}
