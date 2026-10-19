@@ -6,7 +6,7 @@
    Danach einmal  npx cap sync ios  (aendert nichts an den Assets, kopiert nur Web-UI). */
 const fs = require("fs");
 const path = require("path");
-const { png, drawIcon, drawSplash } = require("./png_lib");
+const { png, iconFromMaster, drawSplash } = require("./png_lib");
 
 const assets = path.join(__dirname, "..", "ios", "App", "App", "Assets.xcassets");
 
@@ -17,13 +17,12 @@ function write(file, buf){
 }
 
 /* ── App-Symbol: modernes Ein-1024er-Format (Xcode erzeugt alle Groessen) ──
-   Volle Flaeche ohne abgerundete Ecken: iOS maskiert die Vorlage selbst und
-   verlangt ein opakes Bild (kein Alpha-Kanal). Kulisse = vertikaler Teal-Verlauf
-   wie bei der WOL-App. */
+   Vollflaechiges Master-Icon (Music_Player_full.png) ohne abgerundete Ecken:
+   iOS maskiert die Vorlage selbst und verlangt ein opakes Bild (kein Alpha-Kanal). */
 const appiconDir = path.join(assets, "AppIcon.appiconset");
 fs.rmSync(path.join(appiconDir, "AppIcon-512@2x.png"), { force: true });
 write(path.join(appiconDir, "AppIcon-1024.png"),
-  png(1024, 1024, drawIcon(1024, { rounded: false, radius: 0 })));
+  png(1024, 1024, iconFromMaster(1024)));
 fs.writeFileSync(path.join(appiconDir, "Contents.json"), JSON.stringify({
   images: [ { filename: "AppIcon-1024.png", idiom: "universal", platform: "ios", size: "1024x1024" } ],
   info: { author: "xcode", version: 1 },

@@ -13,7 +13,7 @@
 /* Build-Marke: mit versionName/versionCode in android/app/build.gradle (bzw.
    ios/…/Info.plist) hochziehen, damit auf Geraeten erkennbar ist, welcher Stand
    installiert ist. */
-const APP_VER = "1.1", APP_BUILD = 2;
+const APP_VER = "1.1", APP_BUILD = 3;
 
 /* ─────────────────────────── Utils ───────────────────────────────────── */
 const $  = s => document.querySelector(s);
@@ -1489,7 +1489,8 @@ async function openCutEditor(trackId, plId){
   openSheet(
     '<div class="grab"></div>' +
     '<h2>✂ Schnitt: ' + esc(t.title) + '</h2>' +
-    '<div class="sub">' + esc(t.artist) + " · Laenge " + mmss(t.dur) + " · Playlist: " + esc(pl.name) + '</div>' +
+    '<div class="sub">' + esc(t.artist) + " · Laenge " + mmss(t.dur) + " · Playlist: " + esc(pl.name) +
+      ' · <span id="sheetBuild">v' + APP_VER + " Build " + APP_BUILD + '</span></div>' +
     '<div class="waveWrap" id="wWaveWrap">' +
     '<canvas id="wWave"></canvas>' +
     '<div class="handle" id="hStart"><i></i><span>S</span></div>' +

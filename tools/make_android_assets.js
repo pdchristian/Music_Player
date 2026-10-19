@@ -8,7 +8,7 @@
 */
 const fs = require("fs");
 const path = require("path");
-const { png, drawIcon, drawSplash } = require("./png_lib");
+const { png, iconFromMaster, drawSplash } = require("./png_lib");
 
 const res = path.join(__dirname, "..", "android", "app", "src", "main", "res");
 
@@ -26,17 +26,20 @@ function write(file, buf){
 }
 
 for (const d of DENSITIES){
-  // Launcher-Symbole (klassisch, abgerundete Kachel)
+  // Launcher-Symbole (klassisch): Vollflaechen-Icon aus Music_Player_full.png,
+  // Maskierung uebernimmt der Launcher; Runde Version mit Kreis-Maske.
   write(path.join(res, `mipmap-${d.dir}`, "ic_launcher.png"),
-    png(d.launcher, d.launcher, drawIcon(d.launcher, { rounded: true, radius: d.launcher*0.22 })));
+    png(d.launcher, d.launcher, iconFromMaster(d.launcher)));
   write(path.join(res, `mipmap-${d.dir}`, "ic_launcher_round.png"),
-    png(d.launcher, d.launcher, drawIcon(d.launcher, { rounded: true, radius: d.launcher/2 })));
+    png(d.launcher, d.launcher, iconFromMaster(d.launcher, { mask: "circle" })));
 
-  // Adaptive Icons: weisses Notensymbol in der Safe-Area, Hintergrund = Verlauf-Drawable
-  // (Layer selbst ist transparent, damit ic_launcher_bg.xml – der WOL-Verlauf – durchscheint
-  //  und der monochrome Layer fuer Theme-Icons funktionieren kann)
+  // Adaptive Icons: weisse Note (aus dem Master freigestellt) in der Safe-Area,
+  // Hintergrund = Verlauf-Drawable ic_launcher_bg.xml (passt zum Master-Verlauf).
+  // Die Ebene liegt auf einem 108-dp-Canvas, sichtbar sind nur die mittleren 72 dp;
+  // glyphFill 0.468 (= 0.60 um 22 % verkleinert) entspricht der Referenz-Kachel.
+  // keepOffset: die im Master bewusst nach links/unten gerueckte Note beibehalten.
   write(path.join(res, `mipmap-${d.dir}`, "ic_launcher_foreground.png"),
-    png(d.adaptive, d.adaptive, drawIcon(d.adaptive, { rounded: false, radius: 0, pad: Math.round(d.adaptive*0.26), background: "transparent" })));
+    png(d.adaptive, d.adaptive, iconFromMaster(d.adaptive, { glyphOnly: true, glyphFill: 0.468, keepOffset: true })));
 
   // Splash (Hoch- und Querformat)
   const [sw, sh] = d.splash;
@@ -47,6 +50,6 @@ for (const d of DENSITIES){
 
 // Grosses Store-Asset
 const store = path.join(__dirname, "..", "store");
-write(path.join(store, "icon-512.png"), png(512, 512, drawIcon(512, { rounded: false, radius: 0, pad: 0 })));
+write(path.join(store, "icon-512.png"), png(512, 512, iconFromMaster(512)));
 
 console.log("Android-Ressourcen erzeugt:", DENSITIES.map(d => d.dir).join(", "));

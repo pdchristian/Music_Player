@@ -2,7 +2,7 @@
    BeatClip Service Worker – App-Shell offline cachen (installierbare PWA)
    Audiodaten liegen in IndexedDB und werden bewusst NICHT im Cache dupliziert.
    ═══════════════════════════════════════════════════════════════════════ */
-const CACHE = "beatclip-v9";
+const CACHE = "beatclip-v11";
 const SHELL = [
   "./",
   "./index.html",
