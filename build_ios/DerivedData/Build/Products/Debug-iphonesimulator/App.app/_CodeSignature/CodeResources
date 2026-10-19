@@ -6,7 +6,7 @@
 	<dict>
 		<key>App.debug.dylib</key>
 		<data>
-		dTWPjWLubgTNlZRgn0OejS7PE2w=
+		TYlfJ5LgIYul0Pgcs16YTZuurDA=
 		</data>
 		<key>AppIcon60x60@2x.png</key>
 		<data>
@@ -90,7 +90,7 @@
 		</data>
 		<key>Info.plist</key>
 		<data>
-		m354gxqpsFYZ6Ddk2x+lOPQbhnI=
+		8EWbS7qRbjP/oy4HbnDQ3lXoDeU=
 		</data>
 		<key>PkgInfo</key>
 		<data>
@@ -98,11 +98,11 @@
 		</data>
 		<key>__preview.dylib</key>
 		<data>
-		4aSQ1hMhxq9VROZ4B5W/d4Y1W1E=
+		D+Plk5NH+3bXZE4RmIhJVL4c+O4=
 		</data>
 		<key>capacitor.config.json</key>
 		<data>
-		a5wEnvyXILDVVdiZ6VNV6rY5LJQ=
+		FTazgUlXtBH/njiFoeNDWyQJnAw=
 		</data>
 		<key>config.xml</key>
 		<data>
@@ -167,7 +167,7 @@
 		<dict>
 			<key>hash2</key>
 			<data>
-			R5Xin1tPvg8BZL0rf9Sj7iu65rf5VxYrbmnHGkSmo3M=
+			hGNMvEYX4zzR0i1KSLZCQUNdDDs11ygVRDvBznSsM7U=
 			</data>
 		</dict>
 		<key>AppIcon60x60@2x.png</key>
@@ -314,14 +314,14 @@
 		<dict>
 			<key>hash2</key>
 			<data>
-			C4cxDqWzWhtYLFNLrIimfPGFLLkDgb8YyKV/+xsUhps=
+			jaNboKKvqMzOc8x0umDfwieq8KIpWGeDZClcNZlvlCI=
 			</data>
 		</dict>
 		<key>capacitor.config.json</key>
 		<dict>
 			<key>hash2</key>
 			<data>
-			CaGoOQruhGGECNBooCzszu0B2paegJRJi8hQVHZZnbc=
+			X1fxHSMIfPVRbIqXg88znN/JSZ4lsP15qNqxLFBmXmY=
 			</data>
 		</dict>
 		<key>config.xml</key>

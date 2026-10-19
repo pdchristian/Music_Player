@@ -6,7 +6,7 @@
 	<integer>13</integer>
 	<key>logs</key>
 	<dict>
-		<key>955033E6-7D09-4698-B8FA-41C16B44E1BE</key>
+		<key>753E63F9-4FEC-412C-8CDF-346CBD5D4076</key>
 		<dict>
 			<key>className</key>
 			<string>IDECommandLineBuildLog</string>
@@ -15,49 +15,7 @@
 			<key>domainType</key>
 			<string>Xcode.IDEActivityLogDomainType.BuildLog</string>
 			<key>fileName</key>
-			<string>955033E6-7D09-4698-B8FA-41C16B44E1BE.xcactivitylog</string>
-			<key>hasPrimaryLog</key>
-			<true/>
-			<key>primaryObservable</key>
-			<dict>
-				<key>highLevelStatus</key>
-				<string>E</string>
-				<key>totalNumberOfAnalyzerIssues</key>
-				<integer>0</integer>
-				<key>totalNumberOfErrors</key>
-				<integer>5</integer>
-				<key>totalNumberOfTestFailures</key>
-				<integer>0</integer>
-				<key>totalNumberOfWarnings</key>
-				<integer>1</integer>
-			</dict>
-			<key>schemeIdentifier-containerName</key>
-			<string>App project</string>
-			<key>schemeIdentifier-schemeName</key>
-			<string>App</string>
-			<key>schemeIdentifier-sharedScheme</key>
-			<integer>1</integer>
-			<key>signature</key>
-			<string>Building workspace App with scheme App and configuration Debug</string>
-			<key>timeStartedRecording</key>
-			<real>814127324.61687803</real>
-			<key>timeStoppedRecording</key>
-			<real>814127329.09655404</real>
-			<key>title</key>
-			<string>Building workspace App with scheme App and configuration Debug</string>
-			<key>uniqueIdentifier</key>
-			<string>955033E6-7D09-4698-B8FA-41C16B44E1BE</string>
-		</dict>
-		<key>BAEAD5A9-29D6-414B-9529-CA185DBAFE90</key>
-		<dict>
-			<key>className</key>
-			<string>IDECommandLineBuildLog</string>
-			<key>documentTypeString</key>
-			<string>&lt;nil&gt;</string>
-			<key>domainType</key>
-			<string>Xcode.IDEActivityLogDomainType.BuildLog</string>
-			<key>fileName</key>
-			<string>BAEAD5A9-29D6-414B-9529-CA185DBAFE90.xcactivitylog</string>
+			<string>753E63F9-4FEC-412C-8CDF-346CBD5D4076.xcactivitylog</string>
 			<key>hasPrimaryLog</key>
 			<true/>
 			<key>primaryObservable</key>
@@ -71,7 +29,7 @@
 				<key>totalNumberOfTestFailures</key>
 				<integer>0</integer>
 				<key>totalNumberOfWarnings</key>
-				<integer>32</integer>
+				<integer>31</integer>
 			</dict>
 			<key>schemeIdentifier-containerName</key>
 			<string>App project</string>
@@ -82,55 +40,13 @@
 			<key>signature</key>
 			<string>Building workspace App with scheme App and configuration Debug</string>
 			<key>timeStartedRecording</key>
-			<real>814127491.69738603</real>
+			<real>814131933.94224298</real>
 			<key>timeStoppedRecording</key>
-			<real>814127514.78538501</real>
+			<real>814131973.10184097</real>
 			<key>title</key>
 			<string>Building workspace App with scheme App and configuration Debug</string>
 			<key>uniqueIdentifier</key>
-			<string>BAEAD5A9-29D6-414B-9529-CA185DBAFE90</string>
-		</dict>
-		<key>E5DA647E-DDBF-4106-BABD-C2AE797868D9</key>
-		<dict>
-			<key>className</key>
-			<string>IDECommandLineBuildLog</string>
-			<key>documentTypeString</key>
-			<string>&lt;nil&gt;</string>
-			<key>domainType</key>
-			<string>Xcode.IDEActivityLogDomainType.BuildLog</string>
-			<key>fileName</key>
-			<string>E5DA647E-DDBF-4106-BABD-C2AE797868D9.xcactivitylog</string>
-			<key>hasPrimaryLog</key>
-			<true/>
-			<key>primaryObservable</key>
-			<dict>
-				<key>highLevelStatus</key>
-				<string>E</string>
-				<key>totalNumberOfAnalyzerIssues</key>
-				<integer>0</integer>
-				<key>totalNumberOfErrors</key>
-				<integer>2</integer>
-				<key>totalNumberOfTestFailures</key>
-				<integer>0</integer>
-				<key>totalNumberOfWarnings</key>
-				<integer>27</integer>
-			</dict>
-			<key>schemeIdentifier-containerName</key>
-			<string>App project</string>
-			<key>schemeIdentifier-schemeName</key>
-			<string>App</string>
-			<key>schemeIdentifier-sharedScheme</key>
-			<integer>1</integer>
-			<key>signature</key>
-			<string>Building workspace App with scheme App and configuration Debug</string>
-			<key>timeStartedRecording</key>
-			<real>814127441.24832904</real>
-			<key>timeStoppedRecording</key>
-			<real>814127460.82677102</real>
-			<key>title</key>
-			<string>Building workspace App with scheme App and configuration Debug</string>
-			<key>uniqueIdentifier</key>
-			<string>E5DA647E-DDBF-4106-BABD-C2AE797868D9</string>
+			<string>753E63F9-4FEC-412C-8CDF-346CBD5D4076</string>
 		</dict>
 	</dict>
 </dict>

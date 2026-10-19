@@ -388,6 +388,23 @@ SWIFT_CLASS("_TtC3App11AppDelegate")
 - (nonnull instancetype)init OBJC_DESIGNATED_INITIALIZER;
 @end
 
+@class UIScene;
+@class UISceneSession;
+@class UISceneConnectionOptions;
+@class UIOpenURLContext;
+/// UIScene-Lifecycle, den iOS 26+/27 von Apps mit aktuellem SDK verlangt
+/// (sonst SIGTRAP “NoSceneLifecycleAdoption” beim Start auf dem Geraet).
+/// Das Fenster wird aus dem bestehenden Main-Storyboard erzeugt – dessen
+/// Initial-ViewController ist wie bisher Capacitors BridgeViewController.
+SWIFT_CLASS("_TtC3App13SceneDelegate")
+@interface SceneDelegate : UIResponder <UIWindowSceneDelegate>
+@property (nonatomic, strong) UIWindow * _Nullable window;
+- (void)scene:(UIScene * _Nonnull)scene willConnectToSession:(UISceneSession * _Nonnull)session options:(UISceneConnectionOptions * _Nonnull)connectionOptions;
+/// Warmstart durch “Oeffnen in BeatClip” / URL-Aufruf.
+- (void)scene:(UIScene * _Nonnull)scene openURLContexts:(NSSet<UIOpenURLContext *> * _Nonnull)URLContexts;
+- (nonnull instancetype)init OBJC_DESIGNATED_INITIALIZER;
+@end
+
 #endif // defined(__OBJC__)
 #if __has_attribute(external_source_symbol)
 # pragma clang attribute pop
