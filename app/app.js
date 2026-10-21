@@ -14,7 +14,7 @@
    (BeatClipMedia.appInfo) – die Konstanten dienen nur als Fallback (PWA, iOS ohne
    Plugin-Antwort) und sollten mit android/app/build.gradle bzw. ios/…/project.pbxproj
    mitlaufen. */
-let APP_VER = "1.2", APP_BUILD = 4;
+let APP_VER = "1.2.1", APP_BUILD = 5;
 
 /* ─────────────────────────── Utils ───────────────────────────────────── */
 const $  = s => document.querySelector(s);
