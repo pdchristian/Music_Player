@@ -18,7 +18,7 @@
 #   2. Xcode -> Einstellungen -> Accounts -> Team hinzufuegen (persoenliche
 #      Apple-ID reicht fuer 7-Tage-Sideload).
 #   3. In ios/App das Target App -> Signing & Capabilities -> Team waehlen,
-#      "Bundle Identifier" com.beatclip.app lassen. Speichern (pbxproj bleibt
+#      "Bundle Identifier" com.beatclip-music.app lassen. Speichern (pbxproj bleibt
 #      sonst ohne Team). Alternativ TEAM_ID unten setzen.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -49,13 +49,23 @@ if [ -n "$TEAM_ID" ]; then XC_ARGS+=(DEVELOPMENT_TEAM="$TEAM_ID"); fi
 
 case "$MODE" in
   sim)
-    xcrun simctl boot "iPhone 15" || true
+    # Simulator waehlen: SIM="iPhone 17 Pro" oder SIM=<UDID>; leer/fehlend -> erstes freie iPhone.
+    SIM="${SIM:-iPhone 15}"
+    UDID="$(xcrun simctl list devices available | sed -n "s/^ *${SIM} (\([0-9A-Fa-f-]\{36\}\)).*/\1/p" | head -1 || true)"
+    if [ -z "$UDID" ]; then
+      UDID="$(xcrun simctl list devices available | grep -E '^ *(iPhone|iPad) ' \
+              | sed -n 's/.*(\([0-9A-Fa-f-]\{36\}\)) *(Shutdown).*/\1/p' | head -1 || true)"
+      echo "   Simulator '$SIM' nicht vorhanden -> nutze $UDID"
+    fi
+    [ -n "$UDID" ] || { echo "Kein Simulator gefunden (xcrun simctl list devices)." >&2; exit 1; }
+    xcrun simctl boot "$UDID" 2>/dev/null || true
+    xcrun simctl bootstatus "$UDID" -b
     xcodebuild "${XC_ARGS[@]}" -destination 'generic/platform=iOS Simulator' \
       -sdk iphonesimulator -derivedDataPath "$BUILDDIR/DerivedData" build
     APP="$BUILDDIR/DerivedData/Build/Products/Debug-iphonesimulator/App.app"
-    xcrun simctl install booted "$APP"
-    xcrun simctl launch booted com.beatclip.app
-    echo "==> BeatClip laeuft im Simulator"
+    xcrun simctl install "$UDID" "$APP"
+    xcrun simctl launch "$UDID" com.beatclip-music.app
+    echo "==> BeatClip laeuft im Simulator $UDID"
     ;;
   device)
     xcodebuild "${XC_ARGS[@]}" -destination 'generic/platform=iOS' \

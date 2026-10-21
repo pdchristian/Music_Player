@@ -1,0 +1,39 @@
+{
+  "" : {
+    "diagnostics" : "/Users/cp/Documents/Python/Music_Player/build_ios/DerivedData/Build/Intermediates.noindex/App.build/Debug-iphonesimulator/App.build/Objects-normal/x86_64/App-primary.dia",
+    "emit-module-dependencies" : "/Users/cp/Documents/Python/Music_Player/build_ios/DerivedData/Build/Intermediates.noindex/App.build/Debug-iphonesimulator/App.build/Objects-normal/x86_64/App-primary-emit-module.d",
+    "emit-module-diagnostics" : "/Users/cp/Documents/Python/Music_Player/build_ios/DerivedData/Build/Intermediates.noindex/App.build/Debug-iphonesimulator/App.build/Objects-normal/x86_64/App-primary-emit-module.dia",
+    "pch" : "/Users/cp/Documents/Python/Music_Player/build_ios/DerivedData/Build/Intermediates.noindex/App.build/Debug-iphonesimulator/App.build/Objects-normal/x86_64/App-primary-Bridging-header.pch",
+    "swift-dependencies" : "/Users/cp/Documents/Python/Music_Player/build_ios/DerivedData/Build/Intermediates.noindex/App.build/Debug-iphonesimulator/App.build/Objects-normal/x86_64/App-primary.swiftdeps"
+  },
+  "/Users/cp/Documents/Python/Music_Player/build_ios/DerivedData/Build/Intermediates.noindex/App.build/Debug-iphonesimulator/App.build/DerivedSources/GeneratedAssetSymbols.swift" : {
+    "const-values" : "/Users/cp/Documents/Python/Music_Player/build_ios/DerivedData/Build/Intermediates.noindex/App.build/Debug-iphonesimulator/App.build/Objects-normal/x86_64/GeneratedAssetSymbols.swiftconstvalues",
+    "dependencies" : "/Users/cp/Documents/Python/Music_Player/build_ios/DerivedData/Build/Intermediates.noindex/App.build/Debug-iphonesimulator/App.build/Objects-normal/x86_64/GeneratedAssetSymbols.d",
+    "diagnostics" : "/Users/cp/Documents/Python/Music_Player/build_ios/DerivedData/Build/Intermediates.noindex/App.build/Debug-iphonesimulator/App.build/Objects-normal/x86_64/GeneratedAssetSymbols.dia",
+    "index-unit-output-path" : "/App.build/Debug-iphonesimulator/App.build/Objects-normal/x86_64/GeneratedAssetSymbols.o",
+    "llvm-bc" : "/Users/cp/Documents/Python/Music_Player/build_ios/DerivedData/Build/Intermediates.noindex/App.build/Debug-iphonesimulator/App.build/Objects-normal/x86_64/GeneratedAssetSymbols.bc",
+    "object" : "/Users/cp/Documents/Python/Music_Player/build_ios/DerivedData/Build/Intermediates.noindex/App.build/Debug-iphonesimulator/App.build/Objects-normal/x86_64/GeneratedAssetSymbols.o",
+    "swift-dependencies" : "/Users/cp/Documents/Python/Music_Player/build_ios/DerivedData/Build/Intermediates.noindex/App.build/Debug-iphonesimulator/App.build/Objects-normal/x86_64/GeneratedAssetSymbols.swiftdeps",
+    "swiftmodule" : "/Users/cp/Documents/Python/Music_Player/build_ios/DerivedData/Build/Intermediates.noindex/App.build/Debug-iphonesimulator/App.build/Objects-normal/x86_64/GeneratedAssetSymbols~partial.swiftmodule"
+  },
+  "/Users/cp/Documents/Python/Music_Player/ios/App/App/AppDelegate.swift" : {
+    "const-values" : "/Users/cp/Documents/Python/Music_Player/build_ios/DerivedData/Build/Intermediates.noindex/App.build/Debug-iphonesimulator/App.build/Objects-normal/x86_64/AppDelegate.swiftconstvalues",
+    "dependencies" : "/Users/cp/Documents/Python/Music_Player/build_ios/DerivedData/Build/Intermediates.noindex/App.build/Debug-iphonesimulator/App.build/Objects-normal/x86_64/AppDelegate.d",
+    "diagnostics" : "/Users/cp/Documents/Python/Music_Player/build_ios/DerivedData/Build/Intermediates.noindex/App.build/Debug-iphonesimulator/App.build/Objects-normal/x86_64/AppDelegate.dia",
+    "index-unit-output-path" : "/App.build/Debug-iphonesimulator/App.build/Objects-normal/x86_64/AppDelegate.o",
+    "llvm-bc" : "/Users/cp/Documents/Python/Music_Player/build_ios/DerivedData/Build/Intermediates.noindex/App.build/Debug-iphonesimulator/App.build/Objects-normal/x86_64/AppDelegate.bc",
+    "object" : "/Users/cp/Documents/Python/Music_Player/build_ios/DerivedData/Build/Intermediates.noindex/App.build/Debug-iphonesimulator/App.build/Objects-normal/x86_64/AppDelegate.o",
+    "swift-dependencies" : "/Users/cp/Documents/Python/Music_Player/build_ios/DerivedData/Build/Intermediates.noindex/App.build/Debug-iphonesimulator/App.build/Objects-normal/x86_64/AppDelegate.swiftdeps",
+    "swiftmodule" : "/Users/cp/Documents/Python/Music_Player/build_ios/DerivedData/Build/Intermediates.noindex/App.build/Debug-iphonesimulator/App.build/Objects-normal/x86_64/AppDelegate~partial.swiftmodule"
+  },
+  "/Users/cp/Documents/Python/Music_Player/ios/App/App/SceneDelegate.swift" : {
+    "const-values" : "/Users/cp/Documents/Python/Music_Player/build_ios/DerivedData/Build/Intermediates.noindex/App.build/Debug-iphonesimulator/App.build/Objects-normal/x86_64/SceneDelegate.swiftconstvalues",
+    "dependencies" : "/Users/cp/Documents/Python/Music_Player/build_ios/DerivedData/Build/Intermediates.noindex/App.build/Debug-iphonesimulator/App.build/Objects-normal/x86_64/SceneDelegate.d",
+    "diagnostics" : "/Users/cp/Documents/Python/Music_Player/build_ios/DerivedData/Build/Intermediates.noindex/App.build/Debug-iphonesimulator/App.build/Objects-normal/x86_64/SceneDelegate.dia",
+    "index-unit-output-path" : "/App.build/Debug-iphonesimulator/App.build/Objects-normal/x86_64/SceneDelegate.o",
+    "llvm-bc" : "/Users/cp/Documents/Python/Music_Player/build_ios/DerivedData/Build/Intermediates.noindex/App.build/Debug-iphonesimulator/App.build/Objects-normal/x86_64/SceneDelegate.bc",
+    "object" : "/Users/cp/Documents/Python/Music_Player/build_ios/DerivedData/Build/Intermediates.noindex/App.build/Debug-iphonesimulator/App.build/Objects-normal/x86_64/SceneDelegate.o",
+    "swift-dependencies" : "/Users/cp/Documents/Python/Music_Player/build_ios/DerivedData/Build/Intermediates.noindex/App.build/Debug-iphonesimulator/App.build/Objects-normal/x86_64/SceneDelegate.swiftdeps",
+    "swiftmodule" : "/Users/cp/Documents/Python/Music_Player/build_ios/DerivedData/Build/Intermediates.noindex/App.build/Debug-iphonesimulator/App.build/Objects-normal/x86_64/SceneDelegate~partial.swiftmodule"
+  }
+}

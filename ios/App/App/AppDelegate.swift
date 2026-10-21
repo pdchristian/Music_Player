@@ -48,9 +48,16 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
     // MARK: – Posteingang fuer geteilte Audiodateien (entspricht ShareInbox auf Android)
 
+    /// Gemeinsamer Einstieg fuer Geoeffnete URLs (AppDelegate alt / SceneDelegate neu):
+    /// erst Posteingang pruefen, sonst an Capacitor durchreichen.
+    func handleIncoming(url: URL) {
+        if ingest(url) { return }
+        _ = ApplicationDelegateProxy.shared.application(UIApplication.shared, open: url, options: [:])
+    }
+
     /// Kopiert eine mit BeatClip geoeffnete Audiodatei in den Posteingang;
     /// die Web-UI holt sie sich beim naechsten Sichtbarwerden (importSharedFiles).
-    private func ingest(_ url: URL) -> Bool {
+    func ingest(_ url: URL) -> Bool {
         guard AppDelegate.audioExtensions.contains(url.pathExtension.lowercased()) else { return false }
 
         let scoped = url.startAccessingSecurityScopedResource()

@@ -1,0 +1,28 @@
+PODS:
+  - BeatclipMedia (1.0.0):
+    - Capacitor
+  - Capacitor (6.2.2):
+    - CapacitorCordova
+  - CapacitorCordova (6.2.2)
+
+DEPENDENCIES:
+  - BeatclipMedia (from `../../plugins/beatclip-media`)
+  - "Capacitor (from `../../node_modules/@capacitor/ios`)"
+  - "CapacitorCordova (from `../../node_modules/@capacitor/ios`)"
+
+EXTERNAL SOURCES:
+  BeatclipMedia:
+    :path: "../../plugins/beatclip-media"
+  Capacitor:
+    :path: "../../node_modules/@capacitor/ios"
+  CapacitorCordova:
+    :path: "../../node_modules/@capacitor/ios"
+
+SPEC CHECKSUMS:
+  BeatclipMedia: efa2d04208f821743ef1a9761e694acccbc40e2d
+  Capacitor: 6591a78b923b7e6dde28506ffeea820356e68013
+  CapacitorCordova: c2c76283b5c00cf6073bab0b1311e3b10bd17254
+
+PODFILE CHECKSUM: 7397220b4d118016c596afacaf7e4c58bb20ce73
+
+COCOAPODS: 1.17.0

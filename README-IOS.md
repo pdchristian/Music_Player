@@ -6,7 +6,7 @@ Kontrollzentrum, Lockscreen) und Bluetooth-/Headset-Tasten. Die Oberfläche ist 
 BeatClip-Web-UI aus [`app/`](app/) – Android- und iOS-Version teilen sich den Code,
 die Brücke `BeatClipMedia` hat auf beiden Seiten dieselbe API.
 
-Package-Name: `com.beatclip.app` · Deployment-Ziel iOS 13+ · iPad-Unterstützung an
+Package-Name iOS: `com.beatclip-music.app` (Android bleibt `com.beatclip.app`) · Deployment-Ziel iOS 15+ (Xcode 26/27 baut keine Ziele unter 15.0) · iPad-Unterstützung an · App-Store-Name: „BeatClip Player“ („BeatClip“ war in App Store Connect bereits vergeben)
 
 > **Wichtig:** iOS-Pakete können **nur auf einem Mac mit Xcode** gebaut werden.
 > Dieser Arbeitsordner (Windows) enthält das komplette iOS-Projekt inklusive
