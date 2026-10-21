@@ -41,13 +41,24 @@ obwohl ein neueres APK gebaut wurde. Erst deinstallieren
 (`adb uninstall com.beatclip.app`), danach die APK installieren.
 
 ### Prüfen, welcher Stand auf dem Handy läuft
-Einstellungen → **App-Version** zeigt z. B. `Android-App v1.1 (Build 2)`, ebenso die
-„Über“-Seite. Zu jedem Build müssen `versionCode`/`versionName` in
-[`android/app/build.gradle`](android/app/build.gradle) und `APP_VER`/`APP_BUILD` in
-[`app/app.js`](app/app.js) zusammen hochgezogen werden – sonst ist nicht erkennbar,
-ob das Gerät wirklich die neue Fassung nutzt. Der Capacitor-Asset-Server liefert Web-
-Dateien mit `Cache-Control: no-cache`, ein veralteter WebView-Cache ist bei korrektem
-Installationsvorgang also ausgeschlossen.
+Einstellungen → **App-Version** zeigt z. B. `Android-App v1.2 (Build 4)`, ebenso die
+„Über“-Seite. In der nativen App liest BeatClip die Marke über `BeatClipMedia.appInfo`
+direkt aus dem installierten Paket (`versionName`/`versionCode`), die Anzeige kann also
+nicht mehr davon abweichen. hochzuziehen ist nur noch `versionCode`/`versionName` in
+[`android/app/build.gradle`](android/app/build.gradle) (bzw. `MARKETING_VERSION`/
+`CURRENT_PROJECT_VERSION` in [`ios/App/App.xcodeproj/project.pbxproj`](ios/App/App.xcodeproj/project.pbxproj));
+`APP_VER`/`APP_BUILD` in [`app/app.js`](app/app.js) sind nur noch Fallback für die PWA.
+Der Capacitor-Asset-Server liefert Web-Dateien mit `Cache-Control: no-cache`, ein
+veralteter WebView-Cache ist bei korrektem Installationsvorgang also ausgeschlossen.
+
+### Installieren und gleichzeitig prüfen
+```powershell
+node tools/install_android_apk.js release   # bzw. debug
+# bei Signaturwechsel Debug<->Release: ... release --uninstall (loescht App-Daten)
+```
+Das Skript deinstalliert bei Bedarf die alte Fassung (nötig bei Signaturwechsel
+Debug↔Release), installiert die APK und meldet die tatsächlich installierte
+`versionName`/`versionCode` – so siehst du sofort, ob das Gerät den neuen Stand nutzt.
 
 ---
 

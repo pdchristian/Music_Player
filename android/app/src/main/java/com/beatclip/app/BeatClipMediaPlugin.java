@@ -512,4 +512,23 @@ public class BeatClipMediaPlugin extends Plugin {
         o.put("shared", names);
         call.resolve(o);
     }
+
+    /* Build-Marke direkt aus dem Paket, damit die Anzeige in der App nie gegen
+       versionName/versionCode in android/app/build.gradle driften kann. */
+    @PluginMethod
+    public void appInfo(PluginCall call) {
+        JSObject o = new JSObject();
+        try {
+            android.content.pm.PackageInfo info = getContext().getPackageManager()
+                .getPackageInfo(getContext().getPackageName(), 0);
+            o.put("versionName", info.versionName);
+            // getLongVersionCode erst ab API 28 – darunter liegt der Code in info.versionCode.
+            o.put("versionCode", android.os.Build.VERSION.SDK_INT >= 28
+                ? info.getLongVersionCode() : info.versionCode);
+        } catch (Exception e) {
+            call.reject("App-Version konnte nicht gelesen werden: " + e.getMessage());
+            return;
+        }
+        call.resolve(o);
+    }
 }

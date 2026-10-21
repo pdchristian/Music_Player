@@ -1,10 +1,11 @@
 <!DOCTYPE html>
-<html lang="de">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
-<title>BeatClip – Offline Musik Player</title>
-<meta name="description" content="Offline-Musikplayer mit Schnittfunktion: Start/Ende je Playlist-Titel.">
+<!-- Titel & Beschreibung werden zur Laufzeit übersetzt (translations.js → app.title / app.description) -->
+<title>BeatClip – Offline Music Player</title>
+<meta name="description" content="Offline music player with editing: start/end per playlist track.">
 <meta name="theme-color" content="#00b8a9">
 
 <!-- iOS / iPadOS -->
@@ -28,15 +29,15 @@
       <button class="iconBtn ghost" id="btnBack" data-act="back" hidden>←</button>
       <div class="abTitle">
         <h1 id="abTitle">BeatClip</h1>
-        <div class="abSub" id="abSub">Offline-Player mit Schnittfunktion</div>
+        <div class="abSub" id="abSub" data-i18n="app.tagline">Offline music player with cut editing</div>
       </div>
-      <button class="iconBtn ghost" id="btnInstall" data-act="install" title="App installieren" hidden>⤓</button>
-      <button class="iconBtn ghost" data-act="theme" id="btnTheme" title="Hell/Dunkel">🌙</button>
+      <button class="iconBtn ghost" id="btnInstall" data-act="install" data-i18n-title="install.title" title="Install app" hidden>⤓</button>
+      <button class="iconBtn ghost" data-act="theme" id="btnTheme" data-i18n-title="set.theme_toggle" title="Light/Dark">🌙</button>
     </div>
     <div class="abMeta">
       <span id="abFolder" class="mono">📁 0 Titel</span>
       <span class="spacer"></span>
-      <span class="pill pillBt" id="pillBt" title="Bluetooth-Audioausgabe">🔊 <span id="btLabel">Lautsprecher</span></span>
+      <span class="pill pillBt" id="pillBt" data-i18n-title="bt.output_tooltip" title="Bluetooth audio output">🔊 <span id="btLabel" data-i18n="bt.speaker">Speaker</span></span>
     </div>
   </header>
 
@@ -59,18 +60,18 @@
         <div class="t" id="miniTitle">–</div>
         <div class="s" id="miniSub">–</div>
       </div>
-      <button class="miniPlay" id="miniPlay" data-act="toggle-play" aria-label="Wiedergabe">▶</button>
+      <button class="miniPlay" id="miniPlay" data-act="toggle-play" data-i18n-aria="player.playpause" aria-label="Playback">▶</button>
     </div>
     <div class="miniBar"><i id="miniBarFill"></i></div>
   </div>
 
   <!-- Bottom-Navigation -->
   <nav class="bottomnav">
-    <button class="nav active" data-nav="home"><span class="i">🏠</span><span>Start</span></button>
-    <button class="nav" data-nav="playlists"><span class="i">🎶</span><span>Playlists</span></button>
-    <span class="fabSlot"><button class="fab" data-act="fab-cut" title="Schnitt setzen" aria-label="Schnitt setzen">✂</button></span>
-    <button class="nav" data-nav="library"><span class="i">📁</span><span>Bibliothek</span></button>
-    <button class="nav" data-nav="set"><span class="i">⚙️</span><span>Einstell.</span></button>
+    <button class="nav active" data-nav="home"><span class="i">🏠</span><span data-i18n="nav.home">Home</span></button>
+    <button class="nav" data-nav="playlists"><span class="i">🎶</span><span data-i18n="nav.playlists">Playlists</span></button>
+    <span class="fabSlot"><button class="fab" data-act="fab-cut" data-i18n-title="cut.set" data-i18n-aria="cut.set" title="Set cut" aria-label="Set cut">✂</button></span>
+    <button class="nav" data-nav="library"><span class="i">📁</span><span data-i18n="nav.library">Library</span></button>
+    <button class="nav" data-nav="set"><span class="i">⚙️</span><span data-i18n="nav.settings">Settings</span></button>
   </nav>
 
   <!-- Overlay / Bottom-Sheet / Toast -->
@@ -89,6 +90,7 @@
 </div>
 
 <script src="vendor/lamejs.iife.js"></script>
+<script src="translations.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

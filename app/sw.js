@@ -2,13 +2,18 @@
    BeatClip Service Worker – App-Shell offline cachen (installierbare PWA)
    Audiodaten liegen in IndexedDB und werden bewusst NICHT im Cache dupliziert.
    ═══════════════════════════════════════════════════════════════════════ */
-const CACHE = "beatclip-v11";
+const CACHE = "beatclip-v12";
 const SHELL = [
   "./",
   "./index.html",
   "./manifest.webmanifest",
   "./style.css",
   "./app.js",
+  "./translations.js",
+  "./locales/en.json",
+  "./locales/de.json",
+  "./locales/fr.json",
+  "./locales/es.json",
   "./vendor/lamejs.iife.js",
   "./icons/icon-192.png",
   "./icons/icon-512.png",
@@ -46,8 +51,9 @@ self.addEventListener("fetch", e => {
     );
     return;
   }
-  // App-Code (JS/CSS): Netzwerk zuerst, Cache als Offline-Fallback
-  if (url.pathname.endsWith(".js") || url.pathname.endsWith(".css") || url.pathname.endsWith(".webmanifest")){
+  // App-Code (JS/CSS/Locale-JSON): Netzwerk zuerst, Cache als Offline-Fallback
+  if (url.pathname.endsWith(".js") || url.pathname.endsWith(".css") ||
+      url.pathname.endsWith(".webmanifest") || url.pathname.endsWith(".json")){
     e.respondWith(
       fetch(req).then(res => {
         const copy = res.clone();
@@ -61,6 +67,7 @@ self.addEventListener("fetch", e => {
   e.respondWith(
     caches.match(req).then(hit => hit || fetch(req).then(res => {
       if (res.ok && (url.pathname.endsWith(".css") || url.pathname.endsWith(".js") ||
+                     url.pathname.endsWith(".json") ||
                      url.pathname.endsWith(".png") || url.pathname.endsWith(".webmanifest"))){
         const copy = res.clone();
         caches.open(CACHE).then(c => c.put(req, copy));

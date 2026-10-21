@@ -226,6 +226,14 @@ public class BeatClipMediaPlugin: CAPPlugin, CAPBridgedPlugin, UIDocumentPickerD
         ])
     }
 
+    // Build-Marke direkt aus dem Bundle, damit die App-Anzeige nicht davon ablaufen kann.
+    @objc func appInfo(_ call: CAPPluginCall) {
+        call.resolve([
+            "versionName": Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "",
+            "versionCode": Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "",
+        ])
+    }
+
     // MARK: – Exportierter Audiokanal
 
     @objc func beginAudioExport(_ call: CAPPluginCall) {

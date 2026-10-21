@@ -10,10 +10,11 @@
    • Waveform aus echten Audiodaten (Peak-MinMax), Griffe zum Schneiden
    ═══════════════════════════════════════════════════════════════════════ */
 
-/* Build-Marke: mit versionName/versionCode in android/app/build.gradle (bzw.
-   ios/…/Info.plist) hochziehen, damit auf Geraeten erkennbar ist, welcher Stand
-   installiert ist. */
-const APP_VER = "1.1", APP_BUILD = 3;
+/* Build-Marke: in der nativen App holen wir versionName/versionCode vom Betriebssystem
+   (BeatClipMedia.appInfo) – die Konstanten dienen nur als Fallback (PWA, iOS ohne
+   Plugin-Antwort) und sollten mit android/app/build.gradle bzw. ios/…/project.pbxproj
+   mitlaufen. */
+let APP_VER = "1.2", APP_BUILD = 4;
 
 /* ─────────────────────────── Utils ───────────────────────────────────── */
 const $  = s => document.querySelector(s);
@@ -30,8 +31,8 @@ function mmssPrecise(sec){ sec = Math.max(0, sec);
 function fmtBytes(b){ if(b>=1048576) return (b/1048576).toFixed(1)+" MB";
   if(b>=1024) return (b/1024).toFixed(0)+" KB"; return b+" B"; }
 function timeAgo(ts){ const s = Math.floor((Date.now()-ts)/1000);
-  if (s < 60) return "gerade eben"; if (s < 3600) return Math.floor(s/60)+" min";
-  if (s < 86400) return Math.floor(s/3600)+" h"; return Math.floor(s/86400)+" T"; }
+  if (s < 60) return T("time.justnow"); if (s < 3600) return Math.floor(s/60)+" "+T("time.min");
+  if (s < 86400) return Math.floor(s/3600)+" "+T("time.hour"); return Math.floor(s/86400)+" "+T("time.day"); }
 function toast(msg, isErr){ const el = $("#toast"); el.textContent = msg;
   el.classList.toggle("err", !!isErr); el.classList.add("show");
   clearTimeout(el._tm); el._tm = setTimeout(() => el.classList.remove("show"), 2600); }
@@ -51,8 +52,8 @@ const state = {
   queue:[], qIndex:-1,
   player:{ trackId:null, playing:false },
   settings:{ theme:"dark", repeat:"all", shuffle:false, fade:1.0, gapless:true,
-             volume:0.9, sleepMin:0, plFirstRun:true },
-  bt:{ active:false, label:"Lautsprecher" },
+             volume:0.9, sleepMin:0, plFirstRun:true, language:"" },
+  bt:{ active:false, label:"" },   // label setzt refreshBtInfo() übersetzt
 };
 
 /* ─────────────────────────── IndexedDB ───────────────────────────────── */
@@ -99,7 +100,7 @@ async function loadAll(){
     state.playlists = playlists.sort((a,b) => (a.order||0)-(b.order||0));
     settings.forEach(s => { if (s.key === "settings") Object.assign(state.settings, s.value); });
     if (!state.playlists.length){
-      const pl = { id:uid(), name:"Meine Playlist", cover:"🎶", order:0, items:[] };
+      const pl = { id:uid(), name:T("playlist.default_name"), cover:"🎶", order:0, items:[] };
       await idbPut("playlists", pl); state.playlists.push(pl);
     }
   }catch(e){
@@ -115,7 +116,7 @@ function parseName(filename){
   const base = filename.replace(/\.[a-z0-9]+$/i, "").replace(/_/g, " ");
   const m = base.match(/^(.+?)\s*[-–—]\s*(.+)$/);
   if (m) return { artist:m[1].trim(), title:m[2].trim() };
-  return { artist:"Unbekannt", title:base.trim() };
+  return { artist:T("track.unknown_artist"), title:base.trim() };
 }
 /* Waveform-Peaks (Peak-MinMax) aus echtem Audiomaterial */
 async function computePeaks(arrayBuffer, n){
@@ -189,7 +190,7 @@ async function mp3ChannelsToBlob(channels, sampleRate, kbps, report){
     }
     return out;
   };
-  tell("Sample werden aufbereitet…", 0);
+  tell(T("export.samples"), 0);
   await nextTick();
   const left = toI16(channels[0]);
   if (!exportAlive(job)) throw EXPORT_ABORT;
@@ -204,7 +205,7 @@ async function mp3ChannelsToBlob(channels, sampleRate, kbps, report){
     if (frame.length) parts.push(frame);
     const now = performance.now();
     if (now - painted > 110 || end === left.length){
-      tell("MP3 wird erstellt…", end/left.length); painted = now;
+      tell(T("export.mp3"), end/left.length); painted = now;
       await nextTick();
     }
   }
@@ -227,10 +228,10 @@ async function nativeM4aFile(name, wavBlob, report){
       if (!exportAlive(job)){ await cancelNativeEncode(id); throw EXPORT_ABORT; }
       const bytes = new Uint8Array(await wavBlob.slice(offset, offset+chunkSize).arrayBuffer());
       await NativeMedia.writeAudioEncodeChunk({ id, offset, data:toBase64(bytes) });
-      tell("Rohdaten an die App uebergeben…", Math.min(1, (offset+chunkSize)/wavBlob.size));
+      tell(T("export.rawdata"), Math.min(1, (offset+chunkSize)/wavBlob.size));
     }
     if (!exportAlive(job)){ await cancelNativeEncode(id); throw EXPORT_ABORT; }
-    tell("M4A wird kodiert…", null, true);
+    tell(T("export.m4a"), null, true);
     await NativeMedia.finishAudioEncode({ id, name });
   }catch(error){
     if (!exportAlive(job)){ await cancelNativeEncode(id); throw EXPORT_ABORT; }
@@ -247,14 +248,14 @@ async function cancelNativeEncode(id){
   catch(error){ console.warn("Temporary M4A-Datei konnte nicht entfernt werden:", error); }
 }
 async function importFiles(files){
-  if (!state.db.ok){ toast("Speicher nicht verfügbar – Import unmöglich", true); return; }
+  if (!state.db.ok){ toast(T("toast.storage_blocked"), true); return; }
   // Erst anhand der Endung prüfen, dann (nachrangig) an der MIME-Art –
   // Android meldet .m4a z.T. als video/mp4 oder ohne MIME-Typ.
   const AUDIO_EXT = /\.(mp3|m4a|mp4|aac|ogg|oga|opus|wav|flac|webm)$/i;
   const looksAudio = f => AUDIO_EXT.test(f.name) || /^audio\//.test(f.type || "") ||
     (!AUDIO_EXT.test(f.name) && f.type === "video/mp4");
   const list = Array.from(files).filter(looksAudio);
-  if (!list.length){ toast("Keine Audiodateien ausgewählt – unterstützt: mp3, m4a, aac, ogg, opus, wav, flac, webm", true); return; }
+  if (!list.length){ toast(T("toast.no_audio_files"), true); return; }
   state.ui.importing = true; state.ui.importTotal = list.length; state.ui.importDone = 0;
   renderCurrent();
   try{
@@ -285,7 +286,7 @@ async function importFiles(files){
     state.ui.importing = false;
     renderCurrent();
   }
-  toast(`✅ ${list.length} Titel importiert (${list.length===1?fmtBytes(list[0].size):"mehrere MB"})`);
+  toast(T("toast.imported", { count:list.length, size:list.length===1?fmtBytes(list[0].size):T("import.many_size") }));
 }
 function probeDuration(file){
   return new Promise((res, rej) => {
@@ -301,25 +302,25 @@ function updateRecordingUI(){
   const button = $("#recordBtn"), status = $("#recordingStatus");
   if (!button || !status) return;
   const active = recorderState.recorder?.state === "recording";
-  button.textContent = recorderState.requesting ? "Mikrofon…" :
-    recorderState.saving ? "Speichere…" : active ? "■ Aufnahme beenden" : "🎙 Aufnahme";
+  button.textContent = recorderState.requesting ? T("record.requesting") :
+    recorderState.saving ? T("record.saving") : active ? T("record.stop_btn") : T("record.start_btn");
   button.dataset.act = active ? "record-stop" : "record-start";
   button.disabled = recorderState.requesting || recorderState.saving;
   if (!active && !recorderState.saving && !recorderState.requesting){ status.hidden = true; return; }
   status.hidden = false;
-  status.textContent = recorderState.requesting ? "Mikrofonzugriff wird angefragt…" :
-    recorderState.saving ? "Aufnahme wird in der Bibliothek gespeichert…" :
-    "Aufnahme läuft · " + mmss((Date.now()-recorderState.startedAt)/1000);
+  status.textContent = recorderState.requesting ? T("record.status_requesting") :
+    recorderState.saving ? T("record.status_saving") :
+    T("record.status_running") + " · " + mmss((Date.now()-recorderState.startedAt)/1000);
 }
 function recordingFileName(mimeType){
   const ext = mimeType.includes("mp4") ? "m4a" : mimeType.includes("ogg") ? "ogg" : "webm";
   const stamp = new Date().toISOString().replace(/[:.]/g, "-").replace("T", "_").replace("Z", "");
-  return `BeatClip-Aufnahme_${stamp}.${ext}`;
+  return `${T("record.file_prefix")}_${stamp}.${ext}`;
 }
 async function startRecording(){
   if (recorderState.recorder || recorderState.requesting || recorderState.saving) return;
   if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined"){
-    toast("Mikrofonaufnahme wird von diesem Browser nicht unterstützt", true); return;
+    toast(T("record.unsupported"), true); return;
   }
   let stream;
   recorderState.requesting = true;
@@ -337,7 +338,7 @@ async function startRecording(){
     recorder.ondataavailable = event => { if (event.data.size) recorderState.chunks.push(event.data); };
     recorder.onerror = event => {
       console.error("Aufnahmefehler:", event.error);
-      toast("Aufnahmefehler: " + (event.error?.message || "Mikrofonaufnahme fehlgeschlagen"), true);
+      toast(T("record.error_prefix") + " " + (event.error?.message || T("record.error_generic")), true);
     };
     recorder.onstop = async () => {
       const blob = new Blob(recorderState.chunks, { type:recorder.mimeType || "audio/webm" });
@@ -349,11 +350,11 @@ async function startRecording(){
       clearInterval(recorderState.timer);
       updateRecordingUI();
       try{
-        if (!blob.size) throw new Error("Die Aufnahme enthält keine Audiodaten");
+        if (!blob.size) throw new Error(T("record.no_data"));
         await importFiles([new File([blob], name, { type:blob.type })]);
       }catch(error){
         console.error("Aufnahme konnte nicht gespeichert werden:", error);
-        toast("Aufnahme konnte nicht gespeichert werden: " + error.message, true);
+        toast(T("record.save_error") + " " + error.message, true);
       }finally{
         recorderState.chunks = [];
         recorderState.saving = false;
@@ -365,7 +366,7 @@ async function startRecording(){
     renderCurrent();
     updateRecordingUI();
     recorderState.timer = setInterval(updateRecordingUI, 500);
-    toast("Aufnahme gestartet");
+    toast(T("record.started"));
   }catch(error){
     stream?.getTracks().forEach(track => track.stop());
     recorderState.recorder = null;
@@ -375,7 +376,7 @@ async function startRecording(){
     recorderState.saving = false;
     updateRecordingUI();
     console.error("Mikrofonaufnahme konnte nicht gestartet werden:", error);
-    toast("Mikrofon nicht verfügbar: " + (error.message || "Berechtigung verweigert"), true);
+    toast(T("record.mic_unavailable") + " " + (error.message || T("record.permission_denied")), true);
   }
 }
 function stopRecording(){
@@ -390,31 +391,33 @@ function safeFileBase(name){
 }
 async function extractChannels(trackId){
   const t = track(trackId);
-  if (!t || !idb){ toast("Audiodatei nicht verfügbar", true); return; }
+  if (!t || !idb){ toast(T("toast.audio_unavailable"), true); return; }
   const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-  if (!AudioContextClass){ toast("Audio-Extraktion wird von diesem Gerät nicht unterstützt", true); return; }
+  if (!AudioContextClass){ toast(T("extract.unsupported"), true); return; }
   let context;
   try{
     const rec = await new Promise((resolve, reject) => {
       const request = idb.transaction("blobs", "readonly").objectStore("blobs").get(trackId);
       request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(request.error || new Error("Datei konnte nicht gelesen werden"));
+      request.onerror = () => reject(request.error || new Error(T("extract.read_failed")));
     });
-    if (!rec?.blob) throw new Error("Audiodatei nicht im lokalen Speicher gefunden");
+    if (!rec?.blob) throw new Error(T("extract.not_found"));
     context = new AudioContextClass();
     const buffer = await context.decodeAudioData(await rec.blob.arrayBuffer());
-    if (buffer.numberOfChannels < 2){
-      toast("Diese Datei enthält nur einen Kanal – Stereo-Extraktion ist nicht möglich", true); return;
+    if (buffer.numberOfChannels < 1){
+      toast(T("extract.no_channels"), true); return;
     }
-    const labels = buffer.numberOfChannels === 2 ? ["Links", "Rechts"] :
-      Array.from({ length:buffer.numberOfChannels }, (_, i) => `Kanal ${i+1}`);
+    // Mono-Dateien lassen sich nicht aufteilen – sie werden als ein Track exportiert.
+    const labels = buffer.numberOfChannels === 1 ? [T("channel.mono")] :
+      buffer.numberOfChannels === 2 ? [T("channel.left"), T("channel.right")] :
+      Array.from({ length:buffer.numberOfChannels }, (_, i) => T("channel.n", { n:i+1 }));
     channelExportData = { base:safeFileBase(t.title),
       buffers:labels.map((_, index) => buffer.getChannelData(index)),
       sampleRate:buffer.sampleRate, names:labels };
     openChannelExportSheet(t);
   }catch(error){
     console.error("Kanäle konnten nicht extrahiert werden:", error);
-    toast("Kanäle konnten nicht extrahiert werden: " + (error.message || "Unbekannter Fehler"), true);
+    toast(T("extract.failed") + " " + (error.message || T("error.unknown")), true);
   }finally{
     if (context && context.state !== "closed"){
       try{ await context.close(); }catch(error){ console.warn("AudioContext konnte nicht geschlossen werden:", error); }
@@ -422,9 +425,9 @@ async function extractChannels(trackId){
   }
 }
 const EXPORT_FORMATS = {
-  wav:{ ext:"wav", label:"WAV",  mime:"audio/wav",  desc:"WAV-Audiodatei" },
-  mp3:{ ext:"mp3", label:"MP3",  mime:"audio/mpeg", desc:"MP3-Audiodatei" },
-  m4a:{ ext:"m4a", label:"M4A",  mime:"audio/mp4",  desc:"M4A-Audiodatei" },
+  wav:{ ext:"wav", label:"WAV",  mime:"audio/wav",  desc:"export.desc.wav" },
+  mp3:{ ext:"mp3", label:"MP3",  mime:"audio/mpeg", desc:"export.desc.mp3" },
+  m4a:{ ext:"m4a", label:"M4A",  mime:"audio/mp4",  desc:"export.desc.m4a" },
 };
 function clearChannelExports(){
   exportJob++;                       // laufende Encodings verwerfen
@@ -460,16 +463,16 @@ function renderChannelExportSheet(){
   const chips = ["wav", "mp3", "m4a"].map(f => {
     const off = f === "m4a" && !m4aOn;
     return '<span class="chip' + (channelExportFormat === f ? ' on' : '') + (off ? ' chipOff' : '') + '"' +
-      (off ? ' title="M4A gibts nur in der nativen BeatClip-App"' : '') +
+      (off ? ' title="' + esc(T("extract.m4a_native_only")) + '"' : '') +
       ' data-act="export-format" data-fmt="' + f + '">' + EXPORT_FORMATS[f].label + '</span>';
   }).join("");
   const rows = d.names.map((name, index) => {
     const dis = busy ? ' disabled' : '';
     return '<div class="channelExportRow"><div class="rowInfo"><div class="rowTitle">' +
       esc(d.base + "_" + name) + '.' + EXPORT_FORMATS[channelExportFormat].ext +
-      '</div><div class="rowSub">Kanal: ' + esc(name) + '</div></div>' +
-      '<button class="btn small primary" data-act="save-channel" data-index="' + index + '"' + dis + '>⬇ Speichern</button>' +
-      '<button class="btn small" data-act="share-channel" data-index="' + index + '"' + dis + '>Teilen</button></div>';
+      '</div><div class="rowSub">' + (d.names.length === 1 ? T("channel.mono_track") : T("channel.label") + ' ' + esc(name)) + '</div></div>' +
+      '<button class="btn small primary" data-act="save-channel" data-index="' + index + '"' + dis + '>⬇ ' + T("button.save") + '</button>' +
+      '<button class="btn small" data-act="share-channel" data-index="' + index + '"' + dis + '>' + T("button.share") + '</button></div>';
   }).join("");
   // Rueckmeldung, solange kodiert/uebertragen wird (dauert bei langen Titeln).
   const status = busy
@@ -477,15 +480,14 @@ function renderChannelExportSheet(){
       (busy.pct == null ? '' : ' ' + busy.pct + '%') + '</div>' +
       (busy.pct == null ? '<div class="progress indet"><i></i></div>'
                         : '<div class="progress"><i style="width:' + busy.pct + '%"></i></div>') +
-      (busy.locked ? '' : '<div class="exportHint">Das kann bei langen Titeln einen Moment dauern – Schliessen bricht ab.</div>') +
+      (busy.locked ? '' : '<div class="exportHint">' + T("export.hint") + '</div>') +
       '</div>'
     : "";
-  openSheet('<div class="grab"></div><h2>🎚 Kanäle extrahiert</h2>' +
-    '<div class="sub">' + esc(t.title) + ' · ' + d.names.length + ' Mono-Kanal' +
-    (d.names.length > 1 ? "e" : "") + ' – Format waehlen, dann speichern oder teilen</div>' +
+  openSheet('<div class="grab"></div><h2>' + T("extract.sheet_title") + '</h2>' +
+    '<div class="sub">' + esc(t.title) + ' · ' + (d.names.length === 1 ? T("extract.sub_one") : T("extract.sub_multi", { n:d.names.length })) + '</div>' +
     '<div class="chipRow' + (busy ? ' chipBusy' : '') + '">' + chips + '</div>' +
     status + rows + '<div class="sheetbtns"><button class="btn" data-act="sheet-close"' +
-    (busy && busy.locked ? ' disabled' : '') + '>Fertig</button></div>', true);
+    (busy && busy.locked ? ' disabled' : '') + '>' + T("button.done") + '</button></div>', true);
 }
 /* Liefert (und cacht) die Exportdatei eines Kanals im gewaehlten Format.
    report(label, ratio) uebernimmt die Fortschrittsanzeige im Sheet. */
@@ -499,14 +501,14 @@ async function exportFile(index, report){
   const tell = report || (() => {});
   let file = null;
   if (f === "wav"){
-    tell("WAV wird erstellt…", 0.5);
+    tell(T("export.wav"), 0.5);
     file = new File([wavChannelsToBlob([d.buffers[index]], d.sampleRate)], name, { type:meta.mime });
   }else if (f === "mp3"){
     const blob = await mp3ChannelsToBlob([d.buffers[index]], d.sampleRate, 192, tell);
-    if (!blob){ toast("MP3-Encoder nicht verfuegbar (vendor/lamejs.iife.js fehlt)", true); return null; }
+    if (!blob){ toast(T("export.mp3_encoder_missing"), true); return null; }
     file = new File([blob], name, { type:meta.mime });
   }else if (f === "m4a"){
-    if (!nativeM4aAvailable()){ toast("M4A ist nur in der nativen BeatClip-App verfuegbar", true); return null; }
+    if (!nativeM4aAvailable()){ toast(T("extract.m4a_native_only"), true); return null; }
     return null; // wird direkt nativ codiert und gespeichert
   }
   if (!file) return null;
@@ -530,7 +532,7 @@ async function saveChannelExport(index){
   const f = channelExportFormat;
   const meta = EXPORT_FORMATS[f];
   const d = channelExportData;
-  if (!d) { toast("Exportdatei nicht mehr verfügbar", true); return; }
+  if (!d) { toast(T("toast.export_gone"), true); return; }
   const job = exportJob;
   const name = `${d.base}_${d.names[index]}.${meta.ext}`;
   let exportId = null;
@@ -541,14 +543,14 @@ async function saveChannelExport(index){
   };
   try{
     if (f === "m4a"){
-      if (!nativeM4aAvailable()){ toast("M4A ist nur in der nativen BeatClip-App verfuegbar", true); return; }
-      exportStatus("WAV-Zwischendaten werden erstellt…", 0);
+      if (!nativeM4aAvailable()){ toast(T("extract.m4a_native_only"), true); return; }
+      exportStatus(T("export.wav_temp"), 0);
       await nativeM4aFile(name, wavChannelsToBlob([d.buffers[index]], d.sampleRate), exportStatus);
-      toast("Datei gespeichert");
+      toast(T("toast.file_saved"));
       return;
     }
     const file = await exportFile(index, exportStatus);
-    if (!file){ toast("Exportdatei nicht mehr verfügbar", true); return; }
+    if (!file){ toast(T("toast.export_gone"), true); return; }
     if (NATIVE && NativeMedia?.beginAudioExport && NativeMedia?.writeAudioExportChunk && NativeMedia?.saveAudioExport){
       if (!exportAlive(job)) throw EXPORT_ABORT;
       const started = await NativeMedia.beginAudioExport({ name:file.name });
@@ -558,43 +560,43 @@ async function saveChannelExport(index){
         if (!exportAlive(job)) throw EXPORT_ABORT;
         const bytes = new Uint8Array(await file.slice(offset, offset+chunkSize).arrayBuffer());
         await NativeMedia.writeAudioExportChunk({ id:exportId, offset, data:toBase64(bytes) });
-        exportStatus("Datei an den Speicherdialog uebergeben…", Math.min(1, (offset+chunkSize)/file.size));
+        exportStatus(T("export.handoff"), Math.min(1, (offset+chunkSize)/file.size));
       }
       if (!exportAlive(job)) throw EXPORT_ABORT;
-      exportStatus("Speicherdialog wird geoeffnet…", null, true);
+      exportStatus(T("export.dialog_open"), null, true);
       await NativeMedia.saveAudioExport({ id:exportId, name:file.name, mime:meta.mime });
       exportId = null;
-      toast("Datei gespeichert");
+      toast(T("toast.file_saved"));
       return;
     }
     if (window.showSaveFilePicker){
-      exportStatus("Speicherdialog wird geoeffnet…", null, true);
+      exportStatus(T("export.dialog_open"), null, true);
       const handle = await window.showSaveFilePicker({
         suggestedName:file.name,
-        types:[{ description:meta.desc, accept:{ [meta.mime]:["."+meta.ext] } }],
+        types:[{ description:T(meta.desc), accept:{ [meta.mime]:["."+meta.ext] } }],
       });
-      exportStatus("Datei wird geschrieben…", null, true);
+      exportStatus(T("export.writing"), null, true);
       const writable = await handle.createWritable();
       await writable.write(file);
       await writable.close();
-      toast("Datei gespeichert");
+      toast(T("toast.file_saved"));
       return;
     }
     const url = await exportUrl(index);
-    if (!url){ toast("Exportdatei nicht mehr verfügbar", true); return; }
+    if (!url){ toast(T("toast.export_gone"), true); return; }
     const link = document.createElement("a");
     link.href = url;
     link.download = file.name;
     document.body.appendChild(link);
     link.click();
     link.remove();
-    toast("Download gestartet");
+    toast(T("toast.download_started"));
   }catch(error){
     await dropTemp();
-    if (error === EXPORT_ABORT){ toast("Export abgebrochen"); return; }
+    if (error === EXPORT_ABORT){ toast(T("toast.export_aborted")); return; }
     if (error?.code !== "USER_CANCELLED" && error?.name !== "AbortError"){
       console.error("Datei konnte nicht gespeichert werden:", error);
-      toast("Datei konnte nicht gespeichert werden: " + (error?.message || "Unbekannter Fehler"), true);
+      toast(T("export.save_failed") + " " + (error?.message || T("error.unknown")), true);
     }
   }finally{
     if (exportAlive(job)) exportStatus(null);
@@ -602,11 +604,11 @@ async function saveChannelExport(index){
 }
 /* Demo-Titel (synthetische WAVs), falls keine echten Dateien griffbereit */
 async function importDemoTracks(){
-  if (!state.db.ok){ toast("Speicher nicht verfügbar", true); return; }
+  if (!state.db.ok){ toast(T("toast.storage_short"), true); return; }
   const demos = [
-    { name:"Beispiel-Künstler - Morgenhook.wav", secs:24, base:220, beat:2.0 },
-    { name:"Beispiel-Künstler - Refrain-Wiederholung.wav", secs:30, base:330, beat:1.5 },
-    { name:"Beispiel-Künstler - Nachtloop.wav", secs:20, base:160, beat:2.5 },
+    { name:T("demo.file1"), secs:24, base:220, beat:2.0 },
+    { name:T("demo.file2"), secs:30, base:330, beat:1.5 },
+    { name:T("demo.file3"), secs:20, base:160, beat:2.5 },
   ];
   state.ui.importing = true; state.ui.importTotal = demos.length; state.ui.importDone = 0; renderCurrent();
   for (const d of demos){
@@ -662,7 +664,7 @@ function span(){
   return { start, end, len:Math.max(0.01, end-start), dur:t.dur };
 }
 async function playQueue(plId, itemLocalId){
-  const pl = playlist(plId); if (!pl || !pl.items.length){ toast("Playlist ist leer", true); return; }
+  const pl = playlist(plId); if (!pl || !pl.items.length){ toast(T("toast.playlist_empty"), true); return; }
   state.queue = pl.items.map(i => i.id);
   const idx = state.queue.indexOf(itemLocalId);
   await playItem(state.queue[idx < 0 ? 0 : idx], plId);
@@ -673,7 +675,7 @@ async function playItem(qItem, plId){
   const it = pl.items.find(i => i.id === qItem);
   const t = track(it.trackId); if (!t) return;
   const url = await blobURL(it.trackId);
-  if (!url){ toast("Datei nicht mehr im Speicher gefunden", true); return; }
+  if (!url){ toast(T("toast.file_gone"), true); return; }
 
   state.queue = pl.items.map(i => i.id);
   state.qIndex = state.queue.indexOf(qItem);
@@ -726,11 +728,11 @@ function onCutEnd(){
   if (state.qIndex >= state.queue.length-1 && state.settings.repeat === "off"){
     audio.pause(); state.player.playing = false;
     nativeStopSession();
-    toast(`⏹ „${done.title}“ zu Ende (Schnitt-Ende ${mmssPrecise(span().end)})`);
+    toast(T("toast.cut_end_stop", { title:done.title, end:mmssPrecise(span().end) }));
     renderMini(); refreshCurrent(); return;
   }
   nextTrack(false);
-  toast(`↦ „${done ? done.title : ""}“ fertig · Schnitt-Ende bei ${mmssPrecise(span().end)}`);
+  toast(T("toast.cut_end_next", { title:done ? done.title : "", end:mmssPrecise(span().end) }));
 }
 async function nextTrack(manual){
   clearTimeout(endWatchdog);
@@ -761,7 +763,7 @@ async function togglePlay(){
   if (!state.player.trackId){
     const pl = state.playlists.find(p => p.items.length);
     if (pl && pl.items.length) return playQueue(pl.id, pl.items[0].id);
-    toast("Keine Titel – bitte zuerst Audiodateien importieren", true); return;
+    toast(T("toast.no_tracks"), true); return;
   }
   if (audio.paused){ await audio.play(); state.player.playing = true; }
   else { audio.pause(); state.player.playing = false; }
@@ -806,7 +808,7 @@ function loop(){
                  performance.now() - lastAdvance > 4000){
         stalledNotified = true;
         console.warn("Wiedergabe steht still bei " + audio.currentTime + "s (readyState " + audio.readyState + ")");
-        toast("⚠️ Der Ton steht still – Lautstärke/Bluetooth prüfen", true);
+        toast(T("toast.stalled"), true);
       }
       renderMini(true);
       if (state.screen === "player") updatePlayerUI();
@@ -825,9 +827,9 @@ audio.addEventListener("play",  () => { if (!state.player.playing){ state.player
 
 audio.addEventListener("error", () => {
   if (!audio.error) return;   // src entfernt = kein Fehler
-  const why = ["", "abgebrochen", "Netzwerk", "Dekodierung", "Format nicht unterstuetzt"][audio.error.code] || "unbekannt";
+  const why = ["", T("audio.err.aborted"), T("audio.err.network"), T("audio.err.decode"), T("audio.err.format")][audio.error.code] || T("audio.err.unknown");
   console.error("Audio-Fehler:", audio.error.code, audio.error.message);
-  toast("Audio-Fehler: " + why + " – anderes Format testen", true);
+  toast(T("toast.audio_error", { why }), true);
 });
 
 /* ────────────────── Bluetooth / iOS Audio-Session / Media Session ─────── */
@@ -859,7 +861,7 @@ function updateMediaSession(){
   if (artURL) URL.revokeObjectURL(artURL);
   artURL = artCanvas(512).toDataURL("image/png");
   navigator.mediaSession.metadata = new MediaMetadata({
-    title:t.title, artist:t.artist, album:t.album || "BeatClip (offline)",
+    title:t.title, artist:t.artist, album:t.album || T("media.album"),
     artwork:[ { src:artURL, sizes:"512x512", type:"image/png" } ],
   });
   navigator.mediaSession.setActionHandler("play",  () => audio.play());
@@ -888,10 +890,10 @@ function updateMediaPosition(){
   }catch(e){}
 }
 function refreshBtInfo(){
-  if (NATIVE){ state.bt.label = NATIVE_OS === "iOS" ? "Now Playing / AirPlay" : "Android Media-Ausgabe"; $("#btLabel").textContent = state.bt.label; return; }
+  if (NATIVE){ state.bt.label = NATIVE_OS === "iOS" ? T("bt.now_playing_airplay") : T("bt.android_output"); $("#btLabel").textContent = state.bt.label; return; }
   const iOS = /iP(hone|ad|od)/.test(navigator.userAgent) ||
               (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
-  state.bt.label = iOS ? "AirPlay / BT" : "Bluetooth möglich";
+  state.bt.label = iOS ? T("bt.airplay_bt") : T("bt.possible");
   $("#btLabel").textContent = state.bt.label;
 }
 /* ═══════════════════════════════════════════════════════════════════════
@@ -903,6 +905,17 @@ const NATIVE = !!(window.Capacitor && typeof window.Capacitor.isNativePlatform =
 const NativeMedia = NATIVE && window.Capacitor.Plugins ? (window.Capacitor.Plugins.BeatClipMedia || null) : null;
 const NATIVE_OS = (NATIVE && window.Capacitor.platform === "ios") ? "iOS" : "Android";
 let nativeSessionOn = false, nativeLastSync = 0;
+
+/* Echte Build-Marke vom Geret holen (Android: versionName/versionCode des Pakets),
+   damit die App-Version immer zum installierten APK passt. */
+if (NativeMedia?.appInfo){
+  Promise.resolve(NativeMedia.appInfo()).then(info => {
+    if (!info?.versionName) return;
+    APP_VER = String(info.versionName);
+    if (info.versionCode != null) APP_BUILD = Number(info.versionCode);
+    if (RENDER[state.screen]) refreshCurrent();
+  }).catch(error => console.warn("App-Version konnte nicht gelesen werden:", error));
+}
 
 function nativeSync(force){
   if (!NativeMedia) return;
@@ -959,32 +972,32 @@ async function importSharedFiles(){
       const blob = new Blob(chunks, { type: mimeFor(f.name) });
       await importFiles([ new File([blob], f.name, { type: blob.type }) ]);
       await NativeMedia.deleteSharedFile({ name: f.name });
-    }catch(e){ toast(`„${f.name}“ konnte nicht uebernommen werden`, true); }
+    }catch(e){ toast(T("toast.share_import_failed", { name:f.name }), true); }
   }
 }
 async function checkMediaStatus(){
-  if (!NativeMedia){ toast("Nur in der nativen App verfuegbar", true); return; }
+  if (!NativeMedia){ toast(T("toast.native_only"), true); return; }
   try{
     const perm = await NativeMedia.notificationPermission();
     const st = await NativeMedia.getStatus();
     const shared = Array.isArray(st.shared) ? st.shared.length : (st.shared || 0);
-    openSheet('<div class="grab"></div><h2>🔔 Wiedergabe-Status</h2>' +
-      '<div class="kv"><span class="k">Benachrichtigungen</span><span class="v" style="font-size:13px">' +
-        (perm.granted ? "erlaubt ✅" : (perm.permanentlyDenied ? "dauerhaft abgelehnt ❌" : "nicht gesetzt ⚠️")) + '</span></div>' +
-      '<div class="kv"><span class="k">Hintergrund-Dienst</span><span class="v" style="font-size:13px">' +
-        (st.serviceRunning ? "aktiv ✅" : "inaktiv") + '</span></div>' +
-      '<div class="kv"><span class="k">Geteilte Dateien</span><span class="v" style="font-size:13px">' + shared + '</span></div>' +
+    openSheet('<div class="grab"></div><h2>' + T("media.status_title") + '</h2>' +
+      '<div class="kv"><span class="k">' + T("media.notifications") + '</span><span class="v" style="font-size:13px">' +
+        (perm.granted ? T("media.perm_granted") : (perm.permanentlyDenied ? T("media.perm_denied") : T("media.perm_unset"))) + '</span></div>' +
+      '<div class="kv"><span class="k">' + T("media.service") + '</span><span class="v" style="font-size:13px">' +
+        (st.serviceRunning ? T("media.service_on") : T("media.service_off")) + '</span></div>' +
+      '<div class="kv"><span class="k">' + T("media.shared_files") + '</span><span class="v" style="font-size:13px">' + shared + '</span></div>' +
       (perm.granted ? "" :
-        '<div class="infoBlock">Ohne Benachrichtigungen zeigt ' + NATIVE_OS + ' die Medienleiste moeglicherweise nicht an. Abspielen funktioniert trotzdem; unter Einstellungen → Apps → BeatClip kannst du Benachrichtigungen erlauben.</div>') +
-      '<div class="sheetbtns"><button class="btn" data-act="sheet-close">Schliessen</button>' +
-      '<button class="btn primary" data-act="media-perm">Erlaubnis anfragen</button></div>');
-  }catch(e){ toast("Status nicht abrufbar", true); }
+        '<div class="infoBlock">' + T("media.perm_hint", { os:NATIVE_OS }) + '</div>') +
+      '<div class="sheetbtns"><button class="btn" data-act="sheet-close">' + T("button.close") + '</button>' +
+      '<button class="btn primary" data-act="media-perm">' + T("media.ask_permission") + '</button></div>');
+  }catch(e){ toast(T("toast.status_unavailable"), true); }
 }
 async function askMediaPermission(){
   if (!NativeMedia) return;
   try{
     const p = await NativeMedia.notificationPermission();
-    toast(p.granted ? "Benachrichtigungen erlaubt ✅" : "Keine Berechtigung – Medienleiste evtl. versteckt", !p.granted);
+    toast(p.granted ? T("media.perm_granted_ok") : T("media.perm_missing_warn"), !p.granted);
   }catch(e){}
   closeSheet();
 }
@@ -1043,7 +1056,7 @@ function back(){ const prev = state.stack.pop() || "home"; go(prev, false); }
 function refreshCurrent(){ RENDER[state.screen](); }
 function renderCurrent(){ refreshCurrent(); }
 function updateAppBar(){
-  $("#abFolder").textContent = "📁 " + state.tracks.size + " Titel" + (state.db.ok ? " offline" : "");
+  $("#abFolder").textContent = "📁 " + state.tracks.size + " " + T("common.tracks") + (state.db.ok ? " " + T("common.offline") : "");
 }
 $$(".nav").forEach(n => n.addEventListener("click", () => go(n.dataset.nav, false)));
 
@@ -1058,80 +1071,74 @@ $("#overlay").addEventListener("click", closeSheet);
 /* ─────────────────────────── Screen: START ───────────────────────────── */
 function renderHome(){
   const tracks = Array.from(state.tracks.values());
-  $("#abSub").textContent = state.db.ok ? "Offline-Player mit Schnittfunktion"
-    : "Warnung: Speicher nicht verfuegbar (privater Modus?)";
+  $("#abSub").textContent = state.db.ok ? T("app.tagline")
+    : T("app.storage_warning");
   updateAppBar();
   let html = '<div class="pad">';
-  if (!state.db.ok) html += '<div class="warnbox err">IndexedDB ist blockiert (Safari privater Modus?). ' +
-    'App im normalen Modus oeffnen, dann funktionieren Import und gespeicherte Schnitte.</div>';
+  if (!state.db.ok) html += '<div class="warnbox err">' + T("home.db_blocked") + '</div>';
   if (state.player.trackId){
     const t = track(state.player.trackId), s = span(), c = currentItem();
-    html += '<div class="sectionHeading">Laeuft gerade <span class="line"></span></div>' +
+    html += '<div class="sectionHeading">' + T("home.playing_now") + ' <span class="line"></span></div>' +
       '<div class="panel"><div class="row64" data-act="go-player">' +
       '<div class="cover36">' + t.icon + '</div>' +
       '<div class="rowInfo"><div class="rowTitle">' + esc(t.title) + '</div>' +
-      '<div class="rowSub">' + esc(t.artist) + " · " + (c?.it.cut ? "Schnitt " + mmssPrecise(s.start) + "-" + mmssPrecise(s.end) : "ganzer Titel") + '</div></div>' +
+      '<div class="rowSub">' + esc(t.artist) + " · " + (c?.it.cut ? T("home.cut_label") + " " + mmssPrecise(s.start) + "-" + mmssPrecise(s.end) : T("home.whole_track")) + '</div></div>' +
       '<div class="rowRight"><span class="dot ' + (state.player.playing?"dotPlay":"") + '"></span></div>' +
       '</div></div>';
   }
   if (!tracks.length){
     html += '<div class="panel" style="margin-top:14px"><div class="empty">' +
-      '<span class="big">🎵</span>Noch keine Musik auf diesem Geraet.<br>' +
-      'Audiodateien importieren - sie bleiben lokal im Speicher des Handys.' +
+      '<span class="big">🎵</span>' + T("home.empty") +
       '<div class="btnrow">' +
-      '<button class="btn primary" data-act="pick-files">⬇ Audiodateien waehlen</button>' +
-      '<button class="btn" data-act="demo-tracks">Demo-Titel erzeugen</button>' +
+      '<button class="btn primary" data-act="pick-files">⬇ ' + T("button.pick_files") + '</button>' +
+      '<button class="btn" data-act="demo-tracks">' + T("button.demo_tracks") + '</button>' +
       '</div></div></div>';
   }
-  html += '<div class="sectionHeading">Playlists <span class="line"></span></div><div class="grid">';
+  html += '<div class="sectionHeading">' + T("nav.playlists") + ' <span class="line"></span></div><div class="grid">';
   state.playlists.forEach(pl => {
     const cuts = pl.items.filter(i => i.cut).length;
     html += '<div class="card" data-act="open-pl" data-pl="' + pl.id + '">' +
       '<div class="cover">' + pl.cover + '</div>' +
       '<div class="name">' + esc(pl.name) + '</div>' +
-      '<div class="meta">' + pl.items.length + " Titel" + (cuts ? " · ✂ " + cuts : "") + '</div>' +
+      '<div class="meta">' + pl.items.length + " " + T("common.tracks") + (cuts ? " · ✂ " + cuts : "") + '</div>' +
       '</div>';
   });
   html += '</div>';
   const recent = tracks.slice().sort((a,b) => (b.lastPlay||b.added) - (a.lastPlay||a.added)).slice(0,5);
   if (recent.length){
-    html += '<div class="sectionHeading">Zuletzt gespielt <span class="line"></span></div><div class="panel">';
+    html += '<div class="sectionHeading">' + T("home.recent") + ' <span class="line"></span></div><div class="panel">';
     recent.forEach((t,i) => {
       html += (i ? '<div class="sep"></div>' : "") + '<div class="row64">' +
         '<div class="cover36">' + t.icon + '</div>' +
         '<div class="rowInfo"><div class="rowTitle">' + esc(t.title) + '</div>' +
         '<div class="rowSub">' + esc(t.artist) + " · " + mmss(t.dur) + " · " + timeAgo(t.lastPlay||t.added) + '</div></div>' +
         '<div class="rowRight">' +
-        '<button class="iconBtn" data-act="play-single" data-t="' + t.id + '" title="Abspielen">▶</button>' +
-        '<button class="iconBtn" data-act="edit-cut" data-t="' + t.id + '" title="Schnitt setzen">✂</button>' +
+        '<button class="iconBtn" data-act="play-single" data-t="' + t.id + '" title="' + T("button.play") + '">▶</button>' +
+        '<button class="iconBtn" data-act="edit-cut" data-t="' + t.id + '" title="' + T("cut.set") + '">✂</button>' +
         '</div></div>';
     });
     html += '</div>';
   }
-  html += '<div class="infoBlock">💡 <b>Schnittfunktion:</b> Jeder Titel in einer Playlist hat eigene ' +
-    '<b>Start-</b> und <b>Endmarken</b> - abgespielt wird nur der Abschnitt dazwischen. ' +
-    '<b>Bluetooth:</b> Die Wiedergabe laeuft ueber die System-Audioausgabe - verbinde deinen ' +
-    'Lautsprecher in den Android-/iOS-Einstellungen, die App leitet die Musik automatisch um (⚙️ → Bluetooth).</div></div>';
+  html += '<div class="infoBlock">' + T("home.hint") + '</div></div>';
   $("#s-home").innerHTML = html;
 }
 
 /* ─────────────────────────── Screen: PLAYLISTEN ──────────────────────── */
 function renderPlaylists(){
   let html = '<div class="pad" style="padding-top:14px">' +
-    '<div class="toprow"><div><div class="pageTitle">Playlists</div>' +
-    '<div class="pageSub">' + state.playlists.length + " Listen · " +
-    state.playlists.reduce((a,p)=>a+p.items.length,0) + " Eintraege</div></div>" +
-    '<button class="btn small primary" data-act="new-pl">+ Neue Playlist</button></div>' +
-    '<div class="sectionHeading">Alle Playlists <span class="line"></span></div><div class="panel">';
+    '<div class="toprow"><div><div class="pageTitle">' + T("nav.playlists") + '</div>' +
+    '<div class="pageSub">' + T("playlists.counts", { lists:state.playlists.length, entries:state.playlists.reduce((a,p)=>a+p.items.length,0) }) + '</div></div>' +
+    '<button class="btn small primary" data-act="new-pl">' + T("button.new_playlist") + '</button></div>' +
+    '<div class="sectionHeading">' + T("playlists.all") + ' <span class="line"></span></div><div class="panel">';
   state.playlists.forEach((pl,i) => {
     const cuts = pl.items.filter(x => x.cut).length;
     const total = pl.items.reduce((a,x) => { const t = track(x.trackId); return a + (t ? (x.cut ? x.cut.end-x.cut.start : t.dur) : 0); }, 0);
     html += (i ? '<div class="sep"></div>' : "") + '<div class="row64" data-act="open-pl" data-pl="' + pl.id + '">' +
       '<div class="cover36">' + pl.cover + '</div>' +
       '<div class="rowInfo"><div class="rowTitle">' + esc(pl.name) + '</div>' +
-      '<div class="rowSub">' + pl.items.length + " Titel · " + mmss(total) + " · ✂ " + cuts + " geschnitten</div></div>" +
+      '<div class="rowSub">' + T("playlists.row_sub", { n:pl.items.length, time:mmss(total), cuts }) + '</div></div>' +
       '<div class="rowRight">' +
-      '<button class="iconBtn" data-act="play-pl" data-pl="' + pl.id + '" title="Playlist abspielen">▶</button><span>›</span>' +
+      '<button class="iconBtn" data-act="play-pl" data-pl="' + pl.id + '" title="' + T("button.play_playlist") + '">▶</button><span>›</span>' +
       '</div></div>';
   });
   html += '</div></div>';
@@ -1145,20 +1152,19 @@ function renderPlDetail(){
   let html = '<div class="pad" style="padding-top:6px">' +
     '<div class="toprow">' +
     '<div class="rowInfo"><div class="pageTitle">' + pl.cover + " " + esc(pl.name) + '</div>' +
-    '<div class="pageSub">' + pl.items.length + ' Titel · Titel antippen spielt nur den markierten Abschnitt</div></div>' +
-    '<button class="btn small primary" data-act="play-pl" data-pl="' + pl.id + '">▶ Alle</button>' +
+    '<div class="pageSub">' + T("pl.hint_sub", { n:pl.items.length }) + '</div></div>' +
+    '<button class="btn small primary" data-act="play-pl" data-pl="' + pl.id + '">▶ ' + T("button.play_all") + '</button>' +
     '</div>' +
     '<div class="chipRow" style="margin-top:12px">' +
-    '<span class="chip ' + (state.ui.plSort==="title"?"on":"") + '" data-act="pl-sort" data-s="title">Reihenfolge</span>' +
-    '<span class="chip ' + (state.ui.plSort==="cut"?"on":"") + '" data-act="pl-sort" data-s="cut">Zuerst: mit Schnitt</span>' +
-    '<span class="chip" data-act="add-track" data-pl="' + pl.id + '">+ Titel hinzufuegen</span>' +
+    '<span class="chip ' + (state.ui.plSort==="title"?"on":"") + '" data-act="pl-sort" data-s="title">' + T("pl.sort_order") + '</span>' +
+    '<span class="chip ' + (state.ui.plSort==="cut"?"on":"") + '" data-act="pl-sort" data-s="cut">' + T("pl.sort_cut_first") + '</span>' +
+    '<span class="chip" data-act="add-track" data-pl="' + pl.id + '">' + T("button.add_track") + '</span>' +
     '<span class="chip" data-act="pl-menu" data-pl="' + pl.id + '">⋯</span>' +
     '</div><div class="mono plReorderHint">' +
-    (state.ui.plSort === "title" ? 'Titel am Ziehgriff verschieben.' : 'Zum Verschieben zuerst „Reihenfolge“ auswählen.') +
+    (state.ui.plSort === "title" ? T("pl.reorder_hint_active") : T("pl.reorder_hint_cut")) +
     '</div><div class="panel">';
   if (!pl.items.length){
-    html += '<div class="empty"><span class="big">🎶</span>Diese Playlist ist noch leer.<br>' +
-      '"+ Titel hinzufuegen" waehlt aus deiner Bibliothek.</div>';
+    html += '<div class="empty"><span class="big">🎶</span>' + T("pl.empty") + '</div>';
   }
   let items = pl.items.slice();
   if (state.ui.plSort === "cut") items.sort((a,b) => (b.cut?1:0)-(a.cut?1:0));
@@ -1171,16 +1177,16 @@ function renderPlDetail(){
       '<div class="rowTitle" style="' + (isCur?"color:var(--accent)":"") + '">' + esc(t.title) + '</div>' +
       '<div class="rowSub">' + esc(t.artist) + " · " + mmss(t.dur) + " · " + esc(t.fmt) + '</div>' +
       '<div style="margin-top:5px">' + (it.cut
-        ? '<span class="pill pillCut">✂ ' + mmss(it.cut.end-it.cut.start) + " von " + mmss(t.dur) + '</span>'
-        : '<span class="pill pillFull">ganz</span>') + '</div>' +
+        ? '<span class="pill pillCut">✂ ' + mmss(it.cut.end-it.cut.start) + " " + T("common.of") + " " + mmss(t.dur) + '</span>'
+        : '<span class="pill pillFull">' + T("pl.pill_full") + '</span>') + '</div>' +
       (it.cut ? '<div class="mono" style="margin-top:3px">✂ ' + mmssPrecise(it.cut.start) + " → " + mmssPrecise(it.cut.end) + '</div>' : "") +
       '</div>' +
       '<div class="rowRight">' +
       '<button type="button" class="iconBtn reorderHandle" data-reorder-pl="' + pl.id + '" data-reorder-item="' + it.id +
-      '" aria-label="Titel verschieben" title="' + (state.ui.plSort === "title" ? "Titel verschieben" : "Zur Reihenfolge-Ansicht wechseln") +
+      '" aria-label="' + T("pl.move_track") + '" title="' + (state.ui.plSort === "title" ? T("pl.move_track") : T("pl.switch_order_view")) +
       '"' + (state.ui.plSort === "title" ? "" : " disabled") + '>⠿</button>' +
-      '<button class="iconBtn" data-act="edit-cut" data-t="' + t.id + '" data-pl="' + pl.id + '" title="Schnitt bearbeiten">✂</button>' +
-      '<button class="iconBtn" data-act="track-menu" data-t="' + t.id + '" data-i="' + it.id + '" data-pl="' + pl.id + '" title="Mehr">⋯</button>' +
+      '<button class="iconBtn" data-act="edit-cut" data-t="' + t.id + '" data-pl="' + pl.id + '" title="' + T("cut.edit") + '">✂</button>' +
+      '<button class="iconBtn" data-act="track-menu" data-t="' + t.id + '" data-i="' + it.id + '" data-pl="' + pl.id + '" title="' + T("button.more") + '">⋯</button>' +
       '</div></div>';
   });
   html += '</div></div>';
@@ -1195,35 +1201,33 @@ function renderLibrary(){
   const bytes = all.reduce((a,t) => a + (t.size||0), 0);
   const recordingActive = recorderState.recorder?.state === "recording";
   const recordingBusy = recordingActive || recorderState.requesting || recorderState.saving;
-  const recordingStatus = recorderState.requesting ? "Mikrofonzugriff wird angefragt…" :
-    recorderState.saving ? "Aufnahme wird in der Bibliothek gespeichert…" :
-    recordingActive ? "Aufnahme läuft · " + mmss((Date.now()-recorderState.startedAt)/1000) : "";
+  const recordingStatus = recorderState.requesting ? T("record.status_requesting") :
+    recorderState.saving ? T("record.status_saving") :
+    recordingActive ? T("record.status_running") + " · " + mmss((Date.now()-recorderState.startedAt)/1000) : "";
   let html = '<div class="pad" style="padding-top:14px">' +
-    '<div class="toprow libraryTop"><div class="libraryHeading"><div class="pageTitle">Bibliothek</div>' +
-    '<div class="pageSub">' + all.length + " Dateien · " + fmtBytes(bytes) + ' offline gespeichert</div></div>' +
+    '<div class="toprow libraryTop"><div class="libraryHeading"><div class="pageTitle">' + T("nav.library") + '</div>' +
+    '<div class="pageSub">' + T("library.sub", { n:all.length, size:fmtBytes(bytes) }) + '</div></div>' +
     '<div class="rowRight libraryActions"><button class="btn small" data-act="' + (recordingActive ? "record-stop" : "record-start") +
     '" id="recordBtn"' + (recorderState.requesting || recorderState.saving ||
       (!recordingActive && state.ui.importing) ? " disabled" : "") + '>' +
-    (recorderState.requesting ? "Mikrofon…" : recorderState.saving ? "Speichere…" : recordingActive ? "■ Aufnahme beenden" : "🎙 Aufnahme") + '</button>' +
-    '<button class="btn small" data-act="pick-files">⬇ Import</button></div></div>' +
+    (recorderState.requesting ? T("record.requesting") : recorderState.saving ? T("record.saving") : recordingActive ? T("record.stop_btn") : T("record.start_btn")) + '</button>' +
+    '<button class="btn small" data-act="pick-files">⬇ ' + T("button.import") + '</button></div></div>' +
     '<div class="recordingStatus" id="recordingStatus"' + (recordingBusy ? "" : " hidden") + '>' +
     esc(recordingStatus) + '</div>';
   if (state.ui.importing){
     const p = Math.round(state.ui.importDone/Math.max(1,state.ui.importTotal)*100);
     html += '<div class="panel" style="margin-top:12px;padding:12px">' +
-      '<div class="rowTitle"><span class="spin"></span> Importiere ' + state.ui.importDone + "/" + state.ui.importTotal + "…</div>" +
+      '<div class="rowTitle"><span class="spin"></span> ' + T("library.importing", { done:state.ui.importDone, total:state.ui.importTotal }) + '</div>' +
       '<div class="progress"><i style="width:' + p + '%"></i></div></div>';
   }
-  if (all.length) html += '<div class="search" style="margin-top:12px">🔍<input id="libQ" placeholder="Titel oder Interpret…" value="' + esc(state.ui.libQ) + '"></div>';
+  if (all.length) html += '<div class="search" style="margin-top:12px">🔍<input id="libQ" placeholder="' + T("library.search_placeholder") + '" value="' + esc(state.ui.libQ) + '"></div>';
   if (!all.length){
     html += '<div class="panel" style="margin-top:12px"><div class="empty">' +
-      '<span class="big">📁</span>Leere Bibliothek. Dateien bleiben <b>nur auf diesem Geraet</b> - ' +
-      'kein Konto, kein Streaming.<br>Auf dem Handy: Dateien-App → Audio teilen → "In BeatClip oeffnen" ' +
-      '(installiert) oder hier "⬇ Import".<div class="btnrow">' +
-      '<button class="btn primary" data-act="pick-files">⬇ Audiodateien waehlen</button>' +
-      '<button class="btn" data-act="demo-tracks">Demo-Titel erzeugen</button></div></div></div>';
+      '<span class="big">📁</span>' + T("library.empty") + '<div class="btnrow">' +
+      '<button class="btn primary" data-act="pick-files">⬇ ' + T("button.pick_files") + '</button>' +
+      '<button class="btn" data-act="demo-tracks">' + T("button.demo_tracks") + '</button></div></div></div>';
   } else if (!list.length){
-    html += '<div class="panel" style="margin-top:12px"><div class="empty">Keine Treffer fuer "' + esc(state.ui.libQ) + '".</div></div>';
+    html += '<div class="panel" style="margin-top:12px"><div class="empty">' + T("library.no_results", { q:esc(state.ui.libQ) }) + '</div></div>';
   } else {
     html += '<div class="panel" style="margin-top:10px">';
     list.forEach((t,i) => {
@@ -1234,8 +1238,8 @@ function renderLibrary(){
         '<div class="mono" style="margin-top:3px">' + esc(t.fmt) + " · " + fmtBytes(t.size||0) + " · " + mmss(t.dur) + '</div>' +
         '<canvas class="spark" data-t="' + t.id + '" height="22"></canvas></div>' +
         '<div class="rowRight">' +
-        '<button class="iconBtn" data-act="play-single" data-t="' + t.id + '" title="Abspielen">▶</button>' +
-        '<button class="iconBtn" data-act="lib-menu" data-t="' + t.id + '" title="Mehr">⋯</button>' +
+        '<button class="iconBtn" data-act="play-single" data-t="' + t.id + '" title="' + T("button.play") + '">▶</button>' +
+        '<button class="iconBtn" data-act="lib-menu" data-t="' + t.id + '" title="' + T("button.more") + '">⋯</button>' +
         '</div></div>';
     });
     html += '</div>';
@@ -1270,81 +1274,92 @@ function renderLibrary(){
 function renderSet(){
   const s = state.settings;
   let html = '<div class="pad" style="padding-top:14px">' +
-    '<div class="pageTitle">Einstellungen</div>' +
-    '<div class="sectionHeading">🔊 Bluetooth & Audiogerat <span class="line"></span></div>' +
+    '<div class="pageTitle">' + T("nav.settings") + '</div>' +
+    '<div class="sectionHeading">' + T("set.bt_section") + ' <span class="line"></span></div>' +
     '<div class="panel">' +
     '<div class="btCard"><span class="ico">📶</span><div class="txt">' +
-    '<b>Ausgabe: ' + esc(state.bt.label) + '</b>' +
-    '<p>Verbinde deinen Bluetooth-Lautsprecher in den Systemeinstellungen des Handys ' +
-    '(Android: Schnelleinstellungen → Media-Ausgabe · iPhone: Kontrollzentrum → AirPlay). ' +
-    'BeatClip nutzt die System-Audioausgabe - die Musik laeuft automatisch ueber den ' +
-    'Lautsprecher, auch bei gesperrtem Bildschirm.</p>' +
-    '<div class="btnrow"><button class="btn" data-act="bt-test">▶ Kurz testen</button></div>' +
+    '<b>' + T("set.output") + ': ' + esc(state.bt.label) + '</b>' +
+    '<p>' + T("set.bt_help") + '</p>' +
+    '<div class="btnrow"><button class="btn" data-act="bt-test">' + T("set.bt_test") + '</button></div>' +
     '</div></div>' +
     '<div class="sep"></div>' +
-    '<div class="kv"><span class="k">Aktuelles Audiogerat</span><span class="v" id="btState">-</span></div>' +
+    '<div class="kv"><span class="k">' + T("set.current_device") + '</span><span class="v" id="btState">-</span></div>' +
     '</div>' +
-    '<div class="sectionHeading">Wiedergabe <span class="line"></span></div>' +
+    '<div class="sectionHeading">' + T("set.playback_section") + ' <span class="line"></span></div>' +
     '<div class="panel">' +
-    '<div class="kv"><span class="k">Wiederholen</span><span class="v">' +
-    '<button class="btn small" data-act="cycle-repeat">' + (s.repeat === "all" ? "🔁 Alle" : s.repeat === "one" ? "🔂 Eins" : "⏹ Aus") + '</button></span></div>' +
+    '<div class="kv"><span class="k">' + T("set.repeat") + '</span><span class="v">' +
+    '<button class="btn small" data-act="cycle-repeat">' + (s.repeat === "all" ? T("set.repeat_all") : s.repeat === "one" ? T("set.repeat_one") : T("set.repeat_off")) + '</button></span></div>' +
     '<div class="sep"></div>' +
-    '<div class="kv"><span class="k">Zufallswiedergabe</span><div class="toggle ' + (s.shuffle?"on":"") + '" data-act="tgl" data-k="shuffle"></div></div>' +
+    '<div class="kv"><span class="k">' + T("set.shuffle") + '</span><div class="toggle ' + (s.shuffle?"on":"") + '" data-act="tgl" data-k="shuffle"></div></div>' +
     '<div class="sep"></div>' +
-    '<div class="kv"><span class="k">Ausblenden an Schnittkanten</span><span class="v">' + s.fade.toFixed(1) + ' s ' +
-    '<button class="btn small" data-act="fade-step" style="margin-left:8px">aendern</button></span></div>' +
+    '<div class="kv"><span class="k">' + T("set.fade") + '</span><span class="v">' + s.fade.toFixed(1) + ' s ' +
+    '<button class="btn small" data-act="fade-step" style="margin-left:8px">' + T("button.change") + '</button></span></div>' +
     '<div class="sep"></div>' +
-    '<div class="kv"><span class="k">Sleep-Timer</span><span class="v">' +
-    '<button class="btn small" data-act="sleep">' + (s.sleepMin ? s.sleepMin + " min" : "aus") + '</button></span></div>' +
+    '<div class="kv"><span class="k">' + T("set.sleep") + '</span><span class="v">' +
+    '<button class="btn small" data-act="sleep">' + (s.sleepMin ? T("common.minutes", { n:s.sleepMin }) : T("common.off")) + '</button></span></div>' +
     '</div>' +
-    '<div class="sectionHeading">Speicher <span class="line"></span></div>' +
+    '<div class="sectionHeading">' + T("set.storage_section") + ' <span class="line"></span></div>' +
     '<div class="panel">' +
-    '<div class="kv"><span class="k">Lokaler Speicher</span><span class="v" id="quotaV">…</span></div>' +
+    '<div class="kv"><span class="k">' + T("set.local_storage") + '</span><span class="v" id="quotaV">…</span></div>' +
     '<div class="sep"></div>' +
-    '<div class="kv"><span class="k">Persistente Speicherung</span><span class="v">' +
-    '<button class="btn small" data-act="persist">anfragen</button></span></div>' +
+    '<div class="kv"><span class="k">' + T("set.persistent") + '</span><span class="v">' +
+    '<button class="btn small" data-act="persist">' + T("button.request") + '</button></span></div>' +
     '<div class="sep"></div>' +
-    '<div class="kv"><span class="k">Alle Schnitte loeschen</span><button class="btn small danger" data-act="clear-cuts">Loeschen</button></div>' +
+    '<div class="kv"><span class="k">' + T("set.clear_cuts") + '</span><button class="btn small danger" data-act="clear-cuts">' + T("button.delete") + '</button></div>' +
     '</div>' +
-    '<div class="sectionHeading">Erscheinung <span class="line"></span></div>' +
+    '<div class="sectionHeading">' + T("set.appearance") + ' <span class="line"></span></div>' +
     '<div class="panel">' +
-    '<div class="kv"><span class="k">Design</span><button class="btn small" data-act="theme">' + (s.theme === "dark" ? "🌙 Dunkel" : "☀️ Hell") + '</button></div>' +
+    '<div class="kv"><span class="k">' + T("set.theme") + '</span><button class="btn small" data-act="theme">' + (s.theme === "dark" ? T("set.theme_dark") : T("set.theme_light")) + '</button></div>' +
+    '<div class="sep"></div>' +
+    '<div class="kv"><span class="k">' + T("set.language") + '</span><span class="v">' +
+    '<select id="langSel">' + Object.entries(Translations.availableLanguages()).map(code_name =>
+      '<option value="' + code_name[0] + '"' + (Translations.getLanguage() === code_name[0] ? " selected" : "") + '>' + code_name[1] + '</option>').join("") +
+    '</select></span></div>' +
     '</div>' +
-    '<div class="sectionHeading">' + (NATIVE ? (NATIVE_OS === "iOS" ? "Wiedergabe & Now Playing" : "Wiedergabe & Benachrichtigung") : "Installation") + ' <span class="line"></span></div>' +
+    '<div class="sectionHeading">' + (NATIVE ? (NATIVE_OS === "iOS" ? T("set.playback_native_ios") : T("set.playback_native_android")) : T("set.install_section")) + ' <span class="line"></span></div>' +
     '<div class="panel">' +
     (NATIVE
-      ? '<div class="kv"><span class="k">App-Version</span><span class="v" style="font-size:13px">' + NATIVE_OS + '-App v' + APP_VER + ' (Build ' + APP_BUILD + ')</span></div>' +
+      ? '<div class="kv"><span class="k">' + T("set.app_version") + '</span><span class="v" style="font-size:13px">' + T("set.app_version_value", { os:NATIVE_OS, ver:APP_VER, build:APP_BUILD }) + '</span></div>' +
         '<div class="sep"></div>' +
-        '<div class="kv"><span class="k">' + (NATIVE_OS === "iOS" ? "Now-Playing-Status" : "Medien-Benachrichtigung") + '</span><button class="btn small" data-act="media-status">pruefen</button></span></div>' +
-        '<div class="kv" style="font-size:12px;opacity:.75"><span class="k">' + (NATIVE_OS === "iOS"
-            ? 'Titel, Cover und Tasten erscheinen in "Now Playing" (Kontrollzentrum, Sperrbildschirm, AirPlay); Audiodateien uebergibst du per "Offnen in -> BeatClip".'
-            : 'Titel, Tasten und Bluetooth-Steuerung erscheinen auf dem Sperrbildschirm; Audiodateien kannst du aus jeder App nach BeatClip teilen.') + '</span></div>'
-      : '<div class="kv"><span class="k">Als App installieren</span><span class="v">' +
-        '<button class="btn small primary" data-act="install">⤓ Installieren</button></span></div>' +
+        '<div class="kv"><span class="k">' + (NATIVE_OS === "iOS" ? T("set.now_playing_status") : T("set.media_notification")) + '</span><button class="btn small" data-act="media-status">' + T("button.check") + '</button></span></div>' +
+        '<div class="kv" style="font-size:12px;opacity:.75"><span class="k">' + (NATIVE_OS === "iOS" ? T("set.native_hint_ios") : T("set.native_hint_android")) + '</span></div>'
+      : '<div class="kv"><span class="k">' + T("install.title") + '</span><span class="v">' +
+        '<button class="btn small primary" data-act="install">' + T("install.button") + '</button></span></div>' +
         '<div class="sep"></div>' +
-        '<div class="kv"><span class="k">Installations-Anleitung</span><button class="btn small" data-act="how-install">zeigen</button></div>') +
+        '<div class="kv"><span class="k">' + T("install.how") + '</span><button class="btn small" data-act="how-install">' + T("button.show") + '</button></div>') +
     '</div>' +
-    '<div class="btnrow"><button class="btn" data-act="go-about">ℹ️ Ueber BeatClip</button></div>' +
+    '<div class="btnrow"><button class="btn" data-act="go-about">' + T("button.about") + '</button></div>' +
     '</div>';
   $("#s-set").innerHTML = html;
   updateStoreInfo(); updateBtState();
+  const langSel = $("#langSel");
+  if (langSel){
+    langSel.addEventListener("change", async () => {
+      state.settings.language = langSel.value;
+      await saveSettings();
+      await Translations.setLanguage(langSel.value);   // wie Translations.set_language() + _apply_language() in WOL
+      refreshBtInfo();
+      updateAppBar();
+      refreshCurrent();
+    });
+  }
 }
 async function updateStoreInfo(){
   const el = $("#quotaV"); if (!el) return;
   try{
     const est = await navigator.storage.estimate();
     el.textContent = fmtBytes(est.usage||0) + " / " + fmtBytes(est.quota||0);
-  }catch(e){ el.textContent = "unbekannt"; }
+  }catch(e){ el.textContent = T("common.unknown"); }
 }
 function updateBtState(){
   const el = $("#btState"); if (!el) return;
-  el.textContent = state.bt.label + " (App folgt dem System)";
+  el.textContent = state.bt.label + " (" + T("bt.follows_system") + ")";
 }
 
 /* ─────────────────────────── Screen: PLAYER ──────────────────────────── */
 function renderPlayer(){
   const t = track(state.player.trackId) || Array.from(state.tracks.values())[0];
-  if (!t){ $("#s-player").innerHTML = '<div class="empty" style="padding-top:60px">Kein Titel ausgewaehlt.</div>'; return; }
+  if (!t){ $("#s-player").innerHTML = '<div class="empty" style="padding-top:60px">' + T("player.none") + '</div>'; return; }
   const c = currentItem(); const cut = c ? c.it.cut : null;
   const s = span() || { start:0, end:t.dur||0, len:t.dur||1, dur:t.dur||0 };
   const nid = state.queue[(state.qIndex+1) % Math.max(1,state.queue.length)];
@@ -1352,15 +1367,15 @@ function renderPlayer(){
   const nt = nItem ? track(nItem.trackId) : null;
   let html =
     '<div class="playerHead">' +
-    '<button class="iconBtn" data-act="back" title="Zurueck">←</button>' +
+    '<button class="iconBtn" data-act="back" title="' + T("button.back") + '">←</button>' +
     '<div class="spacer"></div>' +
-    '<span class="pill ' + (cut?"pillCut":"pillFull") + '">' + (cut ? "✂ Schnitt aktiv" : "ganzer Titel") + '</span>' +
+    '<span class="pill ' + (cut?"pillCut":"pillFull") + '">' + (cut ? T("player.cut_active") : T("home.whole_track")) + '</span>' +
     '<div class="spacer"></div>' +
-    '<button class="iconBtn" data-act="edit-cut" data-t="' + t.id + '" title="Schnitt bearbeiten">✂</button>' +
+    '<button class="iconBtn" data-act="edit-cut" data-t="' + t.id + '" title="' + T("cut.edit") + '">✂</button>' +
     '</div>' +
     '<div class="artWrap">' + t.icon + '<div class="cutTag">' +
     (cut ? mmssPrecise(cut.start) + " – " + mmssPrecise(cut.end) + " · " + mmss(cut.end-cut.start)
-         : "kompletter Titel · " + mmss(t.dur)) + '</div></div>' +
+         : T("player.full_track") + " · " + mmss(t.dur)) + '</div></div>' +
     '<div class="pTitle" id="pTitle">' + esc(t.title) + '</div>' +
     '<div class="pArtist" id="pArtist">' + esc(t.artist) + (t.album ? " · " + esc(t.album) : "") + '</div>' +
     '<div class="pTimeline" id="pTimeline">' +
@@ -1371,21 +1386,21 @@ function renderPlayer(){
     '</div>' +
     '<div class="pTimes"><span id="pPos">0:00</span><span id="pLen">-</span></div>' +
     '<div class="pControls">' +
-    '<button class="ctlBtn ' + (state.settings.shuffle?"on":"") + '" data-act="tgl-shuffle" title="Zufall">🔀</button>' +
-    '<button class="ctlBtn" data-act="prev" title="Zurueck">⏮</button>' +
+    '<button class="ctlBtn ' + (state.settings.shuffle?"on":"") + '" data-act="tgl-shuffle" title="' + T("player.shuffle") + '">🔀</button>' +
+    '<button class="ctlBtn" data-act="prev" title="' + T("player.prev") + '">⏮</button>' +
     '<button class="ctlBtn big" id="btnPlay" data-act="toggle-play">' + (state.player.playing ? "⏸" : "▶") + '</button>' +
-    '<button class="ctlBtn" data-act="next" title="Weiter">⏭</button>' +
-    '<button class="ctlBtn ' + (state.settings.repeat!=="off"?"on":"") + '" data-act="cycle-repeat" title="Wiederholen">' + (state.settings.repeat==="one"?"🔂":"🔁") + '</button>' +
+    '<button class="ctlBtn" data-act="next" title="' + T("player.next") + '">⏭</button>' +
+    '<button class="ctlBtn ' + (state.settings.repeat!=="off"?"on":"") + '" data-act="cycle-repeat" title="' + T("set.repeat") + '">' + (state.settings.repeat==="one"?"🔂":"🔁") + '</button>' +
     '</div>' +
     '<div class="skipRow">' +
-    '<button class="btn" data-act="seek-start">⏮ Zum Schnittanfang</button>' +
-    '<button class="btn" data-act="seek-end">Zum Schnittende ⏭</button>' +
+    '<button class="btn" data-act="seek-start">' + T("player.seek_start") + '</button>' +
+    '<button class="btn" data-act="seek-end">' + T("player.seek_end") + '</button>' +
     '</div>' +
     '<div class="volRow">🔈<input type="range" id="vol" min="0" max="100" value="' + Math.round(state.settings.volume*100) + '">🔊' +
     '<span class="mono" id="volVal">' + Math.round(state.settings.volume*100) + ' %</span></div>' +
     '<div class="nextUp panel"><div class="row64" data-act="next">' +
     '<div class="cover36">' + (nt ? nt.icon : "🎵") + '</div>' +
-    '<div class="rowInfo"><div class="rowSub" style="margin:0 0 2px">Als Naechstes' + (nItem?.cut?" (Schnitt)":"") + '</div>' +
+    '<div class="rowInfo"><div class="rowSub" style="margin:0 0 2px">' + T("player.next_up") + (nItem?.cut?" " + T("player.cut_short"):"") + '</div>' +
     '<div class="rowTitle">' + (nt ? esc(nt.title) : "-") + '</div>' +
     '<div class="rowSub">' + (nt ? esc(nt.artist) + " · " + (nt.cut ? mmss(nt.cut.end-nt.cut.start) : mmss(nt.dur)) : "") + '</div></div>' +
     '<div class="rowRight">▶</div></div></div>';
@@ -1416,7 +1431,7 @@ function updatePlayerUI(){
   const t = track(state.player.trackId); if (!t) return;
   const posEl = $("#pPos"); if (!posEl) return;
   posEl.textContent = mmssPrecise(audio.currentTime);
-  $("#pLen").textContent = mmss(s.len) + " von " + mmss(audio.duration || t.dur);
+  $("#pLen").textContent = mmss(s.len) + " " + T("common.of") + " " + mmss(audio.duration || t.dur);
   const dur = audio.duration || t.dur || 1;
   $("#pHead").style.left = clamp(audio.currentTime/dur*100, 0, 100) + "%";
   const bp = $("#btnPlay"); if (bp) bp.textContent = audio.paused ? "▶" : "⏸";
@@ -1488,8 +1503,8 @@ async function openCutEditor(trackId, plId){
   const dur = it.cut.end - it.cut.start;
   openSheet(
     '<div class="grab"></div>' +
-    '<h2>✂ Schnitt: ' + esc(t.title) + '</h2>' +
-    '<div class="sub">' + esc(t.artist) + " · Laenge " + mmss(t.dur) + " · Playlist: " + esc(pl.name) +
+    '<h2>' + T("cut.title", { title:esc(t.title) }) + '</h2>' +
+    '<div class="sub">' + esc(t.artist) + " · " + T("cut.length") + " " + mmss(t.dur) + " · " + T("cut.playlist") + " " + esc(pl.name) +
       ' · <span id="sheetBuild">v' + APP_VER + " Build " + APP_BUILD + '</span></div>' +
     '<div class="waveWrap" id="wWaveWrap">' +
     '<canvas id="wWave"></canvas>' +
@@ -1498,26 +1513,26 @@ async function openCutEditor(trackId, plId){
     '<div class="playhead" id="wHead"></div>' +
     '</div>' +
     '<div class="cutInfo">' +
-    '<div class="cutBox start"><div class="lbl">Start</div><div class="val" id="cStart">' + mmssPrecise(it.cut.start) + '</div></div>' +
-    '<div class="cutBox dur"><div class="lbl">Dauer</div><div class="val" id="cDur">' + mmss(dur) + '</div></div>' +
-    '<div class="cutBox end"><div class="lbl">Ende</div><div class="val" id="cEnd">' + mmssPrecise(it.cut.end) + '</div></div>' +
+    '<div class="cutBox start"><div class="lbl">' + T("cut.start") + '</div><div class="val" id="cStart">' + mmssPrecise(it.cut.start) + '</div></div>' +
+    '<div class="cutBox dur"><div class="lbl">' + T("cut.duration") + '</div><div class="val" id="cDur">' + mmss(dur) + '</div></div>' +
+    '<div class="cutBox end"><div class="lbl">' + T("cut.end") + '</div><div class="val" id="cEnd">' + mmssPrecise(it.cut.end) + '</div></div>' +
     '</div>' +
     '<div class="nudge">' +
     '<button data-act="nudge" data-d="-5">−5 s</button>' +
     '<button data-act="nudge" data-d="-1">−1 s</button>' +
-    '<button data-act="nudge-sel" data-f="start" class="' + (state.ui.nudgeFocus==="start"?"sel":"") + '">↔ Start</button>' +
-    '<button data-act="nudge-sel" data-f="end" class="' + (state.ui.nudgeFocus==="end"?"sel":"") + '">Ende ↔</button>' +
+    '<button data-act="nudge-sel" data-f="start" class="' + (state.ui.nudgeFocus==="start"?"sel":"") + '">↔ ' + T("cut.start") + '</button>' +
+    '<button data-act="nudge-sel" data-f="end" class="' + (state.ui.nudgeFocus==="end"?"sel":"") + '">' + T("cut.end") + ' ↔</button>' +
     '<button data-act="nudge" data-d="1">+1 s</button>' +
     '<button data-act="nudge" data-d="5">+5 s</button>' +
     '</div>' +
-    '<div class="mono" style="text-align:center;margin-top:8px">Griffe S/E ziehen · Flaeche antippen = Abspielposition</div>' +
+    '<div class="mono" style="text-align:center;margin-top:8px">' + T("cut.hint") + '</div>' +
     '<div class="btnrow" style="margin-bottom:0">' +
-    '<button class="btn" data-act="cut-play">▶ Ab Schnittmitte</button>' +
-    '<button class="btn" data-act="cut-reset">Schnitt loeschen</button>' +
+    '<button class="btn" data-act="cut-play">' + T("cut.play_mid") + '</button>' +
+    '<button class="btn" data-act="cut-reset">' + T("cut.remove") + '</button>' +
     '</div>' +
     '<div class="sheetbtns" style="margin-top:10px">' +
-    '<button class="btn" data-act="sheet-close">Abbrechen</button>' +
-    '<button class="btn primary" data-act="cut-save">Schnitt speichern</button>' +
+    '<button class="btn" data-act="sheet-close">' + T("button.cancel") + '</button>' +
+    '<button class="btn primary" data-act="cut-save">' + T("cut.save") + '</button>' +
     '</div>');
   requestAnimationFrame(() => { drawEditorWave(); updateEditorHead(); });
   $("#wWaveWrap").addEventListener("pointerdown", e => {
@@ -1587,12 +1602,12 @@ function finishPlaylistReorder(cancelled){
       state.qIndex = state.queue.indexOf(currentId);
     }
     refreshCurrent();
-    toast("Reihenfolge gespeichert");
+    toast(T("toast.order_saved"));
   }).catch(err => {
     pl.items = originalItems;
     console.error(err);
     refreshCurrent();
-    toast("Reihenfolge konnte nicht gespeichert werden: " + err.message, true);
+    toast(T("toast.order_save_failed") + " " + err.message, true);
   });
 }
 
@@ -1663,7 +1678,7 @@ document.addEventListener("pointerup", async () => {
     state.ui.dragged = true; setTimeout(() => state.ui.dragged = false, 300);
     const pl = playlist(d.pl); if (pl) await savePlaylist(pl);
     const it = state.playlists.flatMap(p=>p.items).find(i => i.id === d.itemLocalId);
-    if (it && it.cut) toast("✂ " + mmssPrecise(it.cut.start) + "-" + mmssPrecise(it.cut.end) + " (" + mmss(it.cut.end-it.cut.start) + ")");
+    if (it && it.cut) toast(T("cut.toast", { start:mmssPrecise(it.cut.start), end:mmssPrecise(it.cut.end), len:mmss(it.cut.end-it.cut.start) }));
     armEndWatchdog();
     refreshCurrent();
   }
@@ -1675,25 +1690,25 @@ function openTrackMenu(trackId, itemLocalId, plId){
   const pl = playlist(plId);
   openSheet('<div class="grab"></div><h2>' + esc(t.title) + '</h2>' +
     '<div class="sub">' + esc(t.artist) + " · " + esc(t.fmt) + " · " + fmtBytes(t.size||0) + " · " + mmss(t.dur) + '</div>' +
-    '<div class="menuitem" data-act="edit-cut" data-t="' + trackId + '" data-pl="' + (plId||"") + '">✂ Schnitt bearbeiten</div>' +
-    '<div class="menuitem" data-act="extract-channels" data-t="' + trackId + '">🎚 Stereo-Kanäle extrahieren</div>' +
-    (itemLocalId ? '<div class="menuitem" data-act="cut-remove" data-i="' + itemLocalId + '" data-pl="' + plId + '">⊘ Schnitt entfernen (ganz abspielen)</div>' : '') +
-    '<div class="menuitem" data-act="add-to-pl-t" data-t="' + trackId + '">＋ Andere Playlists</div>' +
-    (pl ? '<div class="menuitem dngr" data-act="pl-remove" data-i="' + itemLocalId + '" data-pl="' + plId + '">🗑 Aus Playlist entfernen</div>' : '') +
-    '<div class="menuitem dngr" data-act="file-remove" data-t="' + trackId + '">⚠ Datei vom Geraet loeschen</div>' +
-    '<div class="sheetbtns"><button class="btn" data-act="sheet-close">Schliessen</button></div>');
+    '<div class="menuitem" data-act="edit-cut" data-t="' + trackId + '" data-pl="' + (plId||"") + '">✂ ' + T("cut.edit") + '</div>' +
+    '<div class="menuitem" data-act="extract-channels" data-t="' + trackId + '">' + T("track.extract") + '</div>' +
+    (itemLocalId ? '<div class="menuitem" data-act="cut-remove" data-i="' + itemLocalId + '" data-pl="' + plId + '">' + T("track.cut_remove") + '</div>' : '') +
+    '<div class="menuitem" data-act="add-to-pl-t" data-t="' + trackId + '">' + T("track.add_other_pl") + '</div>' +
+    (pl ? '<div class="menuitem dngr" data-act="pl-remove" data-i="' + itemLocalId + '" data-pl="' + plId + '">' + T("track.remove_from_pl") + '</div>' : '') +
+    '<div class="menuitem dngr" data-act="file-remove" data-t="' + trackId + '">' + T("track.delete_file") + '</div>' +
+    '<div class="sheetbtns"><button class="btn" data-act="sheet-close">' + T("button.close") + '</button></div>');
 }
 function openAddToPl(){
   const rows = state.playlists.map(p => {
     const has = p.items.some(i => i.trackId === state.ui.pickerTrack);
     return '<div class="menuitem" data-act="pl-add-pick" data-pl="' + p.id + '">' +
       p.cover + " " + esc(p.name) + ' <span class="spacer"></span>' +
-      (has ? '<span class="pill pillOn">drin</span>' : "hinzufuegen") + '</div>';
+      (has ? '<span class="pill pillOn">' + T("pl.included") + '</span>' : T("pl.add")) + '</div>';
   }).join("");
   const t = track(state.ui.pickerTrack);
-  openSheet('<div class="grab"></div><h2>Zu Playlist hinzufuegen</h2>' +
-    '<div class="sub">' + (t ? esc(t.title) : "Titel") + '</div>' + rows +
-    '<div class="sheetbtns"><button class="btn" data-act="sheet-close">Fertig</button></div>');
+  openSheet('<div class="grab"></div><h2>' + T("pl.add_title") + '</h2>' +
+    '<div class="sub">' + (t ? esc(t.title) : T("common.track")) + '</div>' + rows +
+    '<div class="sheetbtns"><button class="btn" data-act="sheet-close">' + T("button.done") + '</button></div>');
 }
 function openPlAddTrack(plId){
   const pl = playlist(plId);
@@ -1701,44 +1716,44 @@ function openPlAddTrack(plId){
   const rows = Array.from(state.tracks.values()).filter(t => !inPl.has(t.id)).map(t =>
     '<div class="menuitem" data-act="pl-add-track" data-pl="' + plId + '" data-t="' + t.id + '">' +
     t.icon + " " + esc(t.title) + ' <span class="spacer"></span><span class="mono">' + mmss(t.dur) + '</span></div>').join("");
-  openSheet('<div class="grab"></div><h2>Titel zu "' + esc(pl.name) + '"</h2>' +
-    '<div class="sub">' + (rows ? "Aus deiner Bibliothek waehlen" : "Bibliothek ist leer - erst Dateien importieren.") + '</div>' +
-    (rows || '<div class="btnrow"><button class="btn primary" data-act="pick-files">⬇ Importieren</button></div>') +
-    '<div class="sheetbtns"><button class="btn" data-act="sheet-close">Fertig</button></div>');
+  openSheet('<div class="grab"></div><h2>' + T("pl.add_to_title", { name:esc(pl.name) }) + '</h2>' +
+    '<div class="sub">' + (rows ? T("pl.pick_from_library") : T("pl.library_empty")) + '</div>' +
+    (rows || '<div class="btnrow"><button class="btn primary" data-act="pick-files">⬇ ' + T("button.import") + '</button></div>') +
+    '<div class="sheetbtns"><button class="btn" data-act="sheet-close">' + T("button.done") + '</button></div>');
 }
 function openNewPl(){
-  openSheet('<div class="grab"></div><h2>Neue Playlist</h2><div class="sub">Name und Symbol waehlen</div>' +
-    '<div class="search" style="margin-bottom:12px">🎶<input id="npName" placeholder="z. B. Fruehstuecks-Hooks"></div>' +
+  openSheet('<div class="grab"></div><h2>' + T("pl.new_title") + '</h2><div class="sub">' + T("pl.new_sub") + '</div>' +
+    '<div class="search" style="margin-bottom:12px">🎶<input id="npName" placeholder="' + T("pl.name_placeholder") + '"></div>' +
     '<div class="chipRow">' + ["🎧","☀️","🔥","🌙","🏃","🎉","🧠","🌧️"].map((e,i) =>
       '<span class="chip ' + (i===0?"on":"") + '" data-act="np-icon" data-e="' + e + '">' + e + '</span>').join("") + '</div>' +
-    '<div class="sheetbtns"><button class="btn" data-act="sheet-close">Abbrechen</button>' +
-    '<button class="btn primary" data-act="np-create">Anlegen</button></div>');
+    '<div class="sheetbtns"><button class="btn" data-act="sheet-close">' + T("button.cancel") + '</button>' +
+    '<button class="btn primary" data-act="np-create">' + T("button.create") + '</button></div>');
 }
 function isIOS(){
   return /iP(hone|ad|od)/.test(navigator.userAgent) ||
          (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
 }
 function openHowInstall(){
-  openSheet('<div class="grab"></div><h2>⤓ Als App installieren</h2>' +
-    '<div class="sub">BeatClip laeuft offline - wie eine echte App aus dem Store.</div>' +
-    '<div class="sectionHeading">' + (isIOS() ? "iPhone / iPad (Safari)" : "Android (Chrome)") + ' <span class="line"></span></div>' +
+  openSheet('<div class="grab"></div><h2>⤓ ' + T("install.title") + '</h2>' +
+    '<div class="sub">' + T("install.sub") + '</div>' +
+    '<div class="sectionHeading">' + (isIOS() ? T("install.ios_heading") : T("install.android_heading")) + ' <span class="line"></span></div>' +
     (isIOS() ?
-      '<div class="stepline"><span class="num">1</span><span>In <b>Safari</b> auf das <b>Teilen</b>-Symbol tippen</span></div>' +
-      '<div class="stepline"><span class="num">2</span><span>"<b>Zum Startbildschirm hinzufuegen</b>" waehlen</span></div>' +
-      '<div class="stepline"><span class="num">3</span><span>Bestaetigen - Icon erscheint auf dem Startbildschirm</span></div>'
+      '<div class="stepline"><span class="num">1</span><span>' + T("install.ios_step1") + '</span></div>' +
+      '<div class="stepline"><span class="num">2</span><span>' + T("install.ios_step2") + '</span></div>' +
+      '<div class="stepline"><span class="num">3</span><span>' + T("install.ios_step3") + '</span></div>'
       :
-      '<div class="stepline"><span class="num">1</span><span>Menu <b>⋮</b> oben rechts in Chrome oeffnen</span></div>' +
-      '<div class="stepline"><span class="num">2</span><span>"<b>App installieren</b>" / "Zum Startbildschirm hinzufuegen"</span></div>' +
-      '<div class="stepline"><span class="num">3</span><span>Bestaetigen - BeatClip startet randlos wie eine App</span></div>') +
-    '<div class="infoBlock">Nach der Installation: Dateien-App → Audiodatei → Teilen/Oeffnen mit → BeatClip.</div>' +
-    '<div class="sheetbtns"><button class="btn primary" data-act="sheet-close">Verstanden</button></div>');
+      '<div class="stepline"><span class="num">1</span><span>' + T("install.android_step1") + '</span></div>' +
+      '<div class="stepline"><span class="num">2</span><span>' + T("install.android_step2") + '</span></div>' +
+      '<div class="stepline"><span class="num">3</span><span>' + T("install.android_step3") + '</span></div>') +
+    '<div class="infoBlock">' + T("install.hint") + '</div>' +
+    '<div class="sheetbtns"><button class="btn primary" data-act="sheet-close">' + T("button.got_it") + '</button></div>');
 }
 function openPlMenu(plId){
   const pl = playlist(plId);
   openSheet('<div class="grab"></div><h2>' + esc(pl.name) + '</h2>' +
-    '<div class="menuitem" data-act="pl-rename" data-pl="' + plId + '">✏️ Umbenennen</div>' +
-    '<div class="menuitem dngr" data-act="pl-delete" data-pl="' + plId + '">🗑 Playlist loeschen</div>' +
-    '<div class="sheetbtns"><button class="btn" data-act="sheet-close">Schliessen</button></div>');
+    '<div class="menuitem" data-act="pl-rename" data-pl="' + plId + '">✏️ ' + T("pl.rename") + '</div>' +
+    '<div class="menuitem dngr" data-act="pl-delete" data-pl="' + plId + '">🗑 ' + T("pl.delete") + '</div>' +
+    '<div class="sheetbtns"><button class="btn" data-act="sheet-close">' + T("button.close") + '</button></div>');
 }
 
 /* ─────────────────────────── Mini-Player ─────────────────────────────── */
@@ -1761,36 +1776,15 @@ function renderMini(){
 function renderAbout(){
   $("#s-about").innerHTML = '<div class="pad" style="padding-top:6px">' +
     '<div class="aboutBlock"><div class="logoTile">🎧</div>' +
-    '<div class="aboutTitle">BeatClip</div><div class="aboutVer">v' + APP_VER + ' · Build ' + APP_BUILD + ' · ' + (NATIVE ? NATIVE_OS + '-App' : 'PWA (Android + iOS)') + ' · Offline</div>' +
-    '<div class="aboutText">Spielt lokal gespeicherte Audiodateien. Jeder Titel in einer ' +
-    'Playlist hat eigene Start- und Endmarken - abgespielt wird nur der Abschnitt dazwischen. ' +
-    'Musik geht per Bluetooth an deinen Lautsprecher. Mikrofonaufnahmen und Kanal-Export sind ebenfalls möglich.</div></div>' +
-    '<div class="sectionHeading">Plattform-Hinweise <span class="line"></span></div>' +
+    '<div class="aboutTitle">BeatClip</div><div class="aboutVer">v' + APP_VER + ' · Build ' + APP_BUILD + ' · ' + (NATIVE ? T("about.kind_app", { os:NATIVE_OS }) : T("about.kind_pwa")) + ' · ' + T("about.offline") + '</div>' +
+    '<div class="aboutText">' + T("about.text") + '</div></div>' +
+    '<div class="sectionHeading">' + T("about.platform") + ' <span class="line"></span></div>' +
     '<div class="panel" style="padding:12px 14px">' +
-    '<div class="stepline"><span class="num">🤖</span><span><b>Android:</b> ' +
-    (NATIVE ? 'Natives App-Paket (Capacitor) mit Hintergrund-Dienst: Titel/Cover in der Medien-' +
-      'Benachrichtigung und auf dem Sperrbildschirm, Bluetooth-Knopfe (A2DP/AVRCP) steuern Play/Weiter/Zurueck. ' +
-      'Audiodateien aus anderen Apps werden per "Teilen" automatisch uebernommen.'
-      : 'Chrome oeffnet die App randlos, Bluetooth-Ausgabe folgt der System-Media-Ausgabe (A2DP). ' +
-      'Media Session liefert Titel/Cover auf den Sperrbildschirm, BT-Fernbedienungen steuern Play/Weiter/Zurueck.') +
-    '</span></div>' +
-    '<div class="stepline"><span class="num">🍏</span><span>' +
-    (NATIVE_OS === "iOS"
-      ? '<b>iOS/iPadOS:</b> Natives App-Paket (Capacitor) mit AVAudioSession: Wiedergabe laeuft auch bei ' +
-        'gesperrtem Bildschirm und im Hintergrund. Titel/Cover erscheinen in "Now Playing" (Kontrollzentrum, ' +
-        'Sperrbildschirm, Lockscreen), Bluetooth-/Headset-Knopfe steuern Play/Weiter/Zurueck. Audiodateien aus ' +
-        'der Dateien-App per "Offnen in → BeatClip" uebernehmen. Lautsprecher ueber AirPlay waehlbar. ' +
-        'Formate: MP3, AAC/M4A, WAV, ALAC, FLAC.'
-      : '"Zum Startbildschirm hinzufuegen" installiert als App. Wiedergabe laeuft auch bei gesperrtem ' +
-        'Bildschirm; Lautsprecher waehlbar ueber Kontrollzentrum → AirPlay. Formate: MP3, AAC/M4A, WAV ' +
-        '(FLAC je nach Browser).') +
-    '</span></div>' +
-    '<div class="stepline"><span class="num">🔊</span><span>Unterstuetzte Formate im Browser: ' +
-    'MP3, M4A/AAC, OGG/Opus, WAV; FLAC je nach Geraet.</span></div>' +
+    '<div class="stepline"><span class="num">🤖</span><span>' + (NATIVE ? T("about.android_native") : T("about.android_pwa")) + '</span></div>' +
+    '<div class="stepline"><span class="num">🍏</span><span>' + (NATIVE_OS === "iOS" ? T("about.ios_native") : T("about.ios_pwa")) + '</span></div>' +
+    '<div class="stepline"><span class="num">🔊</span><span>' + T("about.browser_formats") + '</span></div>' +
     '</div>' +
-    '<div class="infoBlock">Alle Dateien und Schnitte bleiben ausschliesslich lokal auf diesem Geraet ' +
-    '(IndexedDB, optionale persistente Speicherung). Kein Konto, keine Netzwerkuebertragung. ' +
-    'Aufnahmen werden erst nach dem Stoppen in der Bibliothek gespeichert; Stereo-Kanäle lassen sich als WAV, MP3 oder (in der nativen App) als M4A speichern.</div>' +
+    '<div class="infoBlock">' + T("about.privacy") + '</div>' +
     '</div>';
 }
 
@@ -1808,15 +1802,15 @@ async function handle(act, el){
     case "pl-sort": state.ui.plSort = ds.s; renderPlDetail(); break;
     case "pl-menu": openPlMenu(ds.pl); break;
     case "pl-rename": { const pl = playlist(ds.pl);
-      const n = prompt("Name der Playlist:", pl.name);
-      if (n && n.trim()){ pl.name = n.trim(); await savePlaylist(pl); toast("Umbenannt"); refreshCurrent(); }
+      const n = prompt(T("pl.rename_prompt"), pl.name);
+      if (n && n.trim()){ pl.name = n.trim(); await savePlaylist(pl); toast(T("toast.renamed")); refreshCurrent(); }
       closeSheet(); break; }
     case "pl-delete": { const pl = playlist(ds.pl);
-      if (state.playlists.length <= 1){ toast("Mindestens eine Playlist muss bleiben", true); closeSheet(); break; }
-      if (!confirm("Playlist '" + pl.name + "' wirklich loeschen?")) { closeSheet(); break; }
+      if (state.playlists.length <= 1){ toast(T("toast.one_playlist_min"), true); closeSheet(); break; }
+      if (!confirm(T("confirm.delete_playlist", { name:pl.name }))) { closeSheet(); break; }
       state.playlists = state.playlists.filter(p => p.id !== ds.pl);
       await idbDel("playlists", ds.pl);
-      closeSheet(); toast("Playlist geloescht"); go("playlists", false); break; }
+      closeSheet(); toast(T("toast.playlist_deleted")); go("playlists", false); break; }
     case "play-single": {
       let found = state.playlists.flatMap(p => p.items.map(i => ({pl:p, it:i}))).find(x => x.it.trackId === ds.t);
       if (!found){ const pl = state.playlists[0]; found = { pl, it:{ id:uid(), trackId:ds.t, cut:null } };
@@ -1824,7 +1818,7 @@ async function handle(act, el){
       playItem(found.it.id, found.pl.id); break; }
     case "play-item": playItem(ds.i, ds.pl); break;
     case "play-pl": { const p = playlist(ds.pl);
-      if (!p.items.length){ toast("'" + p.name + "' ist leer - erst Titel hinzufuegen", true); break; }
+      if (!p.items.length){ toast(T("toast.playlist_empty_named", { name:p.name }), true); break; }
       playQueue(p.id, p.items[0].id); break; }
     case "play-next": nextTrack(true); break;
     case "toggle-play": togglePlay(); break;
@@ -1842,19 +1836,19 @@ async function handle(act, el){
     case "extract-channels": closeSheet(); await extractChannels(ds.t); break;
     case "share-channel": {
       if (state.ui.exportBusy) break;
-      if (channelExportFormat === "m4a"){ toast("M4A nur ueber \u2B07 Speichern sichern \u2013 Teilen geht hier mit WAV oder MP3", true); break; }
+      if (channelExportFormat === "m4a"){ toast(T("export.m4a_save_only"), true); break; }
       const job = exportJob;
       try{
         const file = await exportFile(Number(ds.index), exportStatus);
-        if (!file){ toast("Exportdatei nicht mehr verfuegbar", true); break; }
+        if (!file){ toast(T("toast.export_gone"), true); break; }
         if (!exportAlive(job)) break;
-        if (typeof navigator.share !== "function"){ toast("Teilen wird auf diesem Gerät nicht unterstützt", true); break; }
-        exportStatus("Teilen wird vorbereitet…", null);
+        if (typeof navigator.share !== "function"){ toast(T("share.unsupported"), true); break; }
+        exportStatus(T("share.preparing"), null);
         await navigator.share({ files:[file], title:file.name });
       }catch(error){
         if (error !== EXPORT_ABORT && error.name !== "AbortError"){
           console.error("Datei konnte nicht geteilt werden:", error);
-          toast("Datei konnte nicht geteilt werden:" + error.message, true);
+          toast(T("share.failed") + " " + error.message, true);
         }
       }finally{
         if (exportAlive(job)) exportStatus(null);
@@ -1865,7 +1859,7 @@ async function handle(act, el){
       if (state.ui.exportBusy) break;
       const f = ds.fmt;
       if (!EXPORT_FORMATS[f]) break;
-      if (f === "m4a" && !nativeM4aAvailable()){ toast("M4A ist nur in der nativen BeatClip-App verfuegbar", true); break; }
+      if (f === "m4a" && !nativeM4aAvailable()){ toast(T("extract.m4a_native_only"), true); break; }
       channelExportFormat = f;
       renderChannelExportSheet();
       break;
@@ -1879,19 +1873,19 @@ async function handle(act, el){
       const tid = state.ui.pickerTrack; if (!tid) { closeSheet(); break; }
       if (!pl.items.some(i => i.trackId === tid)){
         pl.items.push({ id:uid(), trackId:tid, cut:null }); await savePlaylist(pl);
-        toast("➕ → " + pl.name);
+        toast(T("toast.added_to", { name:pl.name }));
       } closeSheet(); refreshCurrent(); break; }
     case "pl-add-track": { const pl = playlist(ds.pl);
       pl.items.push({ id:uid(), trackId:ds.t, cut:null }); await savePlaylist(pl);
-      closeSheet(); toast("Hinzugefuegt"); refreshCurrent(); break; }
+      closeSheet(); toast(T("toast.added")); refreshCurrent(); break; }
     case "cut-remove": { const pl = playlist(ds.pl); const it = pl.items.find(i => i.id === ds.i);
-      if (it){ it.cut = null; await savePlaylist(pl); toast("Schnitt entfernt - ganzer Titel"); }
+      if (it){ it.cut = null; await savePlaylist(pl); toast(T("toast.cut_removed")); }
       closeSheet(); refreshCurrent(); renderMini(); break; }
     case "pl-remove": { const pl = playlist(ds.pl);
       pl.items = pl.items.filter(i => i.id !== ds.i); await savePlaylist(pl);
-      closeSheet(); toast("Aus Playlist entfernt"); refreshCurrent(); break; }
+      closeSheet(); toast(T("toast.removed_from_pl")); refreshCurrent(); break; }
     case "file-remove": {
-      if (!confirm("Titel samt Audiodatei vom Geraet loeschen?")) { closeSheet(); break; }
+      if (!confirm(T("confirm.delete_track"))) { closeSheet(); break; }
       state.playlists.forEach(p => p.items = p.items.filter(i => i.trackId !== ds.t));
       await Promise.all(state.playlists.map(savePlaylist));
       await idbDel("tracks", ds.t); await idbDel("blobs", ds.t);
@@ -1899,41 +1893,41 @@ async function handle(act, el){
       if (state.player.trackId === ds.t){ audio.pause(); audio.removeAttribute("src");
         state.player.trackId = null; state.player.playing = false; }
       state.tracks.delete(ds.t);
-      closeSheet(); toast("Vom Geraet geloescht"); refreshCurrent(); renderMini(); break; }
+      closeSheet(); toast(T("toast.deleted_from_device")); refreshCurrent(); renderMini(); break; }
     case "clear-cuts": {
-      if (!confirm("Alle Schnitte aller Playlists entfernen?")) break;
+      if (!confirm(T("confirm.clear_cuts"))) break;
       let n = 0;
       for (const p of state.playlists){ let dirty = false;
         p.items.forEach(i => { if (i.cut){ i.cut = null; n++; dirty = true; } });
         if (dirty) await savePlaylist(p); }
-      toast(n + " Schnitte geloescht"); refreshCurrent(); renderMini(); break; }
+      toast(T("toast.cuts_deleted", { n })); refreshCurrent(); renderMini(); break; }
     case "tgl": state.settings[ds.k] = !state.settings[ds.k]; saveSettings(); renderSet(); break;
     case "fade-step": state.settings.fade = (state.settings.fade + .5) > 4 ? 0 : +(state.settings.fade + .5).toFixed(1);
-      saveSettings(); renderSet(); toast("Blendzeit: " + state.settings.fade + " s"); break;
+      saveSettings(); renderSet(); toast(T("toast.fade_set", { v:state.settings.fade })); break;
     case "sleep": { const opts = [0,15,30,45,60];
       state.settings.sleepMin = opts[(opts.indexOf(state.settings.sleepMin)+1) % opts.length];
       saveSettings(); renderSet();
-      toast(state.settings.sleepMin ? "Sleep-Timer: " + state.settings.sleepMin + " min" : "Sleep-Timer aus"); break; }
+      toast(state.settings.sleepMin ? T("toast.sleep_set", { n:state.settings.sleepMin }) : T("toast.sleep_off")); break; }
     case "new-pl": openNewPl(); break;
     case "np-icon": state.ui.npIcon = ds.e;
       $$("[data-act=np-icon]").forEach(c => c.classList.toggle("on", c.dataset.e === ds.e)); break;
     case "np-create": {
-      const name = ($("#npName") ? $("#npName").value.trim() : "") || "Neue Playlist";
+      const name = ($("#npName") ? $("#npName").value.trim() : "") || T("pl.new_default_name");
       const pl = { id:uid(), name, cover:state.ui.npIcon || "🎧", order:state.playlists.length, items:[] };
       state.playlists.push(pl); await savePlaylist(pl);
-      closeSheet(); toast("Playlist '" + name + "' angelegt"); renderPlaylists(); break; }
+      closeSheet(); toast(T("toast.playlist_created", { name })); renderPlaylists(); break; }
     case "pick-files": $("#filePick").click(); break;
     case "demo-tracks": importDemoTracks(); break;
-    case "bt-test": { if (!state.player.trackId){ toast("Erst einen Titel abspielen, dann erkennt die App das Audiogerat", true); break; }
-      togglePlay(); toast("▶ Laeuft - Lautsprecher in den Systemeinstellungen waehlen"); break; }
+    case "bt-test": { if (!state.player.trackId){ toast(T("toast.bt_test_first"), true); break; }
+      togglePlay(); toast(T("toast.bt_test_ok")); break; }
     case "persist": {
-      if (!navigator.storage || !navigator.storage.persist){ toast("nicht unterstuetzt", true); break; }
+      if (!navigator.storage || !navigator.storage.persist){ toast(T("toast.not_supported"), true); break; }
       let p = await navigator.storage.persist();
-      toast(p ? "✅ Persistente Speicherung aktiv" : "Anfrage abgelehnt", !p); break; }
+      toast(p ? T("toast.persist_on") : T("toast.persist_denied"), !p); break; }
     case "fab-cut": {
       const target = state.player.trackId || state.ui.pickerTrack ||
         (state.playlists.flatMap(p=>p.items)[0] ? state.playlists.flatMap(p=>p.items)[0].trackId : null);
-      if (!target){ toast("Kein Titel vorhanden - erst importieren", true); break; }
+      if (!target){ toast(T("toast.no_track_import"), true); break; }
       openCutEditor(target, currentItem() ? currentItem().pl.id : state.ui.activePl); break; }
     case "how-install": openHowInstall(); break;
     case "install": doInstall(); break;
@@ -1943,20 +1937,20 @@ async function handle(act, el){
     case "cut-save": {
       const it = editedItem(); const pl = playlist(state.ui.editPl);
       if (it && pl){ await savePlaylist(pl);
-        toast("✂ Schnitt gespeichert: " + mmssPrecise(it.cut.start) + "-" + mmssPrecise(it.cut.end));
+        toast(T("toast.cut_saved", { start:mmssPrecise(it.cut.start), end:mmssPrecise(it.cut.end) }));
         if (state.player.trackId === it.trackId){
           audio.currentTime = clamp(audio.currentTime, it.cut.start, it.cut.end); armEndWatchdog(); }
       }
       closeSheet(); refreshCurrent(); renderMini(); break; }
     case "cut-reset": { const it = editedItem(); const t = track(state.ui.editTrack);
       it.cut = { start:0, end:t.dur || audio.duration || 0 }; updateEditorHead();
-      toast("Schnitt zurueckgesetzt (ganzer Titel)"); break; }
+      toast(T("toast.cut_reset")); break; }
     case "cut-play": {
       const it = editedItem(); const t = track(state.ui.editTrack);
       const mid = it.cut ? (it.cut.start + it.cut.end)/2 : 0;
       if (state.player.trackId !== t.id){
         const url = await blobURL(t.id);
-        if (!url){ toast("Datei fehlt", true); break; }
+        if (!url){ toast(T("toast.file_missing"), true); break; }
         audio.src = url; state.player.trackId = t.id;
         const found = state.playlists.flatMap(p => p.items.map(i => ({pl:p, it:i}))).find(x => x.it.id === state.ui.editItem);
         if (found){ state.queue = found.pl.items.map(i => i.id); state.qIndex = state.queue.indexOf(found.it.id); }
@@ -1993,11 +1987,11 @@ async function doInstall(){
   if (deferredInstall){
     deferredInstall.prompt();
     const ch = await deferredInstall.userChoice;
-    if (ch.outcome === "accepted"){ toast("App wird installiert 🎉"); $("#btnInstall").hidden = true; }
+    if (ch.outcome === "accepted"){ toast(T("toast.installing")); $("#btnInstall").hidden = true; }
     deferredInstall = null;
   } else openHowInstall();
 }
-window.addEventListener("appinstalled", () => { toast("BeatClip installiert ✅"); $("#btnInstall").hidden = true; });
+window.addEventListener("appinstalled", () => { toast(T("toast.installed")); $("#btnInstall").hidden = true; });
 function applyTheme(){
   document.body.dataset.theme = state.settings.theme;
   $("#btnTheme").textContent = state.settings.theme === "dark" ? "🌙" : "☀️";
@@ -2009,7 +2003,7 @@ document.addEventListener("click", e => {
   if (!el) return;
   if (state.ui.drag || state.ui.reorder || state.ui.dragged) return;
   e.stopPropagation();
-  Promise.resolve(handle(el.dataset.act, el)).catch(err => { console.error(err); toast("Fehler: " + err.message, true); });
+  Promise.resolve(handle(el.dataset.act, el)).catch(err => { console.error(err); toast(T("toast.error", { msg:err.message }), true); });
 });
 $("#filePick").addEventListener("change", e => {
   if (e.target.files && e.target.files.length) importFiles(e.target.files);
@@ -2029,8 +2023,14 @@ document.addEventListener("keydown", e => {
 
 (async function init(){
   applyTheme();
-  refreshBtInfo();
+  /* Sprache initialisieren – wie in der WOL-App: zuerst Systemsprache (damit
+     statische Texte und der Standard-Playlistname sofort übersetzt sind), nach
+     dem Laden der Einstellungen ggf. der gespeicherte Wert aus IndexedDB. */
+  await Translations.init("");
   await loadAll();
+  if (state.settings.language && state.settings.language !== Translations.getLanguage())
+    await Translations.setLanguage(state.settings.language);
+  refreshBtInfo();
   await registerSW();
   setupNativeBridge();
   if (NATIVE){
