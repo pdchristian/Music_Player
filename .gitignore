@@ -1,0 +1,10 @@
+# Gradle-Cache- und Build-Verzeichnisse (überall im Repo) —
+# deckt z. B. android/.gradle/ und node_modules/@capacitor/android/capacitor/.gradle/ ab.
+# Achtung: .gradle-QUELLDATEIEN (build.gradle, settings.gradle, variables.gradle …)
+# sind weiterhin getrackt, da nur Verzeichnisse namens ".gradle/" ignoriert werden.
+.gradle/
+**/.gradle/
+**/.gradle/**
+
+# Gradle-Wrappercache, falls jemals unter einem anderen Pfad erzeugt
+**/gradle/wrapper/dists/
