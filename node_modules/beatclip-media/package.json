@@ -1,0 +1,11 @@
+{
+  "name": "beatclip-media",
+  "version": "1.0.0",
+  "private": true,
+  "description": "BeatClip – native iOS-Bruecke: Now Playing, Hintergrund-Wiedergabe, per 'Oeffnen in' uebernommene Audiodateien",
+  "capacitor": {
+    "ios": {
+      "src": "ios"
+    }
+  }
+}
