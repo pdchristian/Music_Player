@@ -6,7 +6,7 @@
 	<integer>13</integer>
 	<key>logs</key>
 	<dict>
-		<key>753E63F9-4FEC-412C-8CDF-346CBD5D4076</key>
+		<key>2720C6C4-73D5-42B0-8710-1285C66EEC7C</key>
 		<dict>
 			<key>className</key>
 			<string>IDECommandLineBuildLog</string>
@@ -15,7 +15,7 @@
 			<key>domainType</key>
 			<string>Xcode.IDEActivityLogDomainType.BuildLog</string>
 			<key>fileName</key>
-			<string>753E63F9-4FEC-412C-8CDF-346CBD5D4076.xcactivitylog</string>
+			<string>2720C6C4-73D5-42B0-8710-1285C66EEC7C.xcactivitylog</string>
 			<key>hasPrimaryLog</key>
 			<true/>
 			<key>primaryObservable</key>
@@ -29,7 +29,7 @@
 				<key>totalNumberOfTestFailures</key>
 				<integer>0</integer>
 				<key>totalNumberOfWarnings</key>
-				<integer>31</integer>
+				<integer>16</integer>
 			</dict>
 			<key>schemeIdentifier-containerName</key>
 			<string>App project</string>
@@ -40,13 +40,97 @@
 			<key>signature</key>
 			<string>Building workspace App with scheme App and configuration Debug</string>
 			<key>timeStartedRecording</key>
-			<real>814131933.94224298</real>
+			<real>814673361.94538903</real>
 			<key>timeStoppedRecording</key>
-			<real>814131973.10184097</real>
+			<real>814673373.52610898</real>
 			<key>title</key>
 			<string>Building workspace App with scheme App and configuration Debug</string>
 			<key>uniqueIdentifier</key>
-			<string>753E63F9-4FEC-412C-8CDF-346CBD5D4076</string>
+			<string>2720C6C4-73D5-42B0-8710-1285C66EEC7C</string>
+		</dict>
+		<key>509B4F87-15BD-447D-9477-A29AD41A9203</key>
+		<dict>
+			<key>className</key>
+			<string>IDECommandLineBuildLog</string>
+			<key>documentTypeString</key>
+			<string>&lt;nil&gt;</string>
+			<key>domainType</key>
+			<string>Xcode.IDEActivityLogDomainType.BuildLog</string>
+			<key>fileName</key>
+			<string>509B4F87-15BD-447D-9477-A29AD41A9203.xcactivitylog</string>
+			<key>hasPrimaryLog</key>
+			<true/>
+			<key>primaryObservable</key>
+			<dict>
+				<key>highLevelStatus</key>
+				<string>E</string>
+				<key>totalNumberOfAnalyzerIssues</key>
+				<integer>0</integer>
+				<key>totalNumberOfErrors</key>
+				<integer>1</integer>
+				<key>totalNumberOfTestFailures</key>
+				<integer>0</integer>
+				<key>totalNumberOfWarnings</key>
+				<integer>13</integer>
+			</dict>
+			<key>schemeIdentifier-containerName</key>
+			<string>App project</string>
+			<key>schemeIdentifier-schemeName</key>
+			<string>App</string>
+			<key>schemeIdentifier-sharedScheme</key>
+			<integer>1</integer>
+			<key>signature</key>
+			<string>Building workspace App with scheme App and configuration Debug</string>
+			<key>timeStartedRecording</key>
+			<real>814673277.628106</real>
+			<key>timeStoppedRecording</key>
+			<real>814673290.01570106</real>
+			<key>title</key>
+			<string>Building workspace App with scheme App and configuration Debug</string>
+			<key>uniqueIdentifier</key>
+			<string>509B4F87-15BD-447D-9477-A29AD41A9203</string>
+		</dict>
+		<key>DEBA705C-4C97-4FF5-8BEB-FE9A597EA956</key>
+		<dict>
+			<key>className</key>
+			<string>IDECommandLineBuildLog</string>
+			<key>documentTypeString</key>
+			<string>&lt;nil&gt;</string>
+			<key>domainType</key>
+			<string>Xcode.IDEActivityLogDomainType.BuildLog</string>
+			<key>fileName</key>
+			<string>DEBA705C-4C97-4FF5-8BEB-FE9A597EA956.xcactivitylog</string>
+			<key>hasPrimaryLog</key>
+			<true/>
+			<key>primaryObservable</key>
+			<dict>
+				<key>highLevelStatus</key>
+				<string>W</string>
+				<key>totalNumberOfAnalyzerIssues</key>
+				<integer>0</integer>
+				<key>totalNumberOfErrors</key>
+				<integer>0</integer>
+				<key>totalNumberOfTestFailures</key>
+				<integer>0</integer>
+				<key>totalNumberOfWarnings</key>
+				<integer>16</integer>
+			</dict>
+			<key>schemeIdentifier-containerName</key>
+			<string>App project</string>
+			<key>schemeIdentifier-schemeName</key>
+			<string>App</string>
+			<key>schemeIdentifier-sharedScheme</key>
+			<integer>1</integer>
+			<key>signature</key>
+			<string>Building workspace App with scheme App and configuration Debug</string>
+			<key>timeStartedRecording</key>
+			<real>814673747.48466003</real>
+			<key>timeStoppedRecording</key>
+			<real>814673756.39420199</real>
+			<key>title</key>
+			<string>Building workspace App with scheme App and configuration Debug</string>
+			<key>uniqueIdentifier</key>
+			<string>DEBA705C-4C97-4FF5-8BEB-FE9A597EA956</string>
 		</dict>
 	</dict>
 </dict>

@@ -11,6 +11,17 @@
 #   ./tools/build_ios.sh              Debug-Build, direkt aufs iPhone (xcodebuild + devicectl)
 #   ./tools/build_ios.sh ipa          Ad-hoc-.ipa fuer dist/ios (Signing-Nachweise noetig, s.u.)
 #   ./tools/build_ios.sh sim          Build+Start im iOS-Simulator
+#   ./tools/build_ios.sh testflight   Release-Archiv fuer TestFlight (liegt im Xcode-Organizer)
+#   ./tools/build_ios.sh testflight-upload   Archiv + Direkt-Upload zu App Store Connect
+#       dafuer Umgebungsvariablen setzen (App Store Connect -> Benutzer und Zugriffe
+#       -> Integrationen -> "App Store Connect API", Rolle Entwickler oder Admin):
+#         ASC_KEY_PATH=/pfad/AuthKey_XXXXXXXX.p8  ASC_KEY_ID=XXXXXXXX  ASC_ISSUER_ID=xxxxxxxx-xxxx-...
+#
+# TestFlight-Vorbereitung (einmalig):
+#   • Bezahltes Apple-Developer-Konto, App mit Bundle-ID com.beatclip-music.app in
+#     App Store Connect anlegen. Version/Build stehen im Xcode-Projekt
+#     (ios/App/App.xcodeproj -> MARKETING_VERSION / CURRENT_PROJECT_VERSION).
+#   • Apple-Distribution-Zertifikat legt Xcode beim ersten Upload automatisch an.
 #
 # Ad-hoc-Signing vorbereiten (einmal pro Geraet):
 #   1. Geraet per USB an den Mac, in Xcode -> Fenster -> Geraete und Simulator
@@ -43,9 +54,13 @@ mkdir -p "$BUILDDIR" dist/ios
 
 # Persoenliches Entwicklungsprofil: xcodebuild kann mit -allowProvisioningUpdates
 # automatisch Profile erzeugen/aktualisieren (dafuer Apple-ID im Token-Stored).
-XC_ARGS=(-workspace ios/App/App.xcworkspace -scheme App -configuration Debug
+XC_BASE=(-workspace ios/App/App.xcworkspace -scheme App
          -allowProvisioningUpdates -allowProvisioningDeviceRegistration)
-if [ -n "$TEAM_ID" ]; then XC_ARGS+=(DEVELOPMENT_TEAM="$TEAM_ID"); fi
+XC_ARGS=("${XC_BASE[@]}" -configuration Debug)
+XC_ARGS_TF=("${XC_BASE[@]}" -configuration Release)   # TestFlight/Archive
+if [ -n "$TEAM_ID" ]; then
+  XC_ARGS+=(DEVELOPMENT_TEAM="$TEAM_ID"); XC_ARGS_TF+=(DEVELOPMENT_TEAM="$TEAM_ID")
+fi
 
 case "$MODE" in
   sim)
@@ -97,6 +112,35 @@ PLIST
     echo "==> dist/ios/App.ipa gebaut (Ad-hoc). Installation z.B. mit Apple Configurator, dem"
     echo "   Apple Development-Tool 'xcrun devicectl device install app', oder 'cfgutil'."
     ;;
+  testflight)
+    # Release-Archiv im Ordner, den Xcode im Organizer (Fenster -> Organizer) anzeigt.
+    ARC="$HOME/Library/Developer/Xcode/Archives/$(date +%Y-%m-%d)/App-$(date +%H.%M.%S).xcarchive"
+    mkdir -p "$(dirname "$ARC")"
+    xcodebuild "${XC_ARGS_TF[@]}" -destination 'generic/platform=iOS' \
+      -archivePath "$ARC" archive
+    INFO="$ARC/Products/Applications/App.app/Info.plist"
+    echo "==> Archiv: $ARC"
+    echo "    Version: $(plutil -extract CFBundleShortVersionString raw "$INFO")" \
+         "(Build $(plutil -extract CFBundleVersion raw "$INFO"))"
+    echo "    Jetzt in Xcode: Fenster -> Organizer -> dieses Archiv -> Distribute App"
+    echo "    -> App Store Connect -> Upload (TestFlight-Internes Testprogramm waelhen)."
+    ;;
+  testflight-upload)
+    # Archiv bauen und direkt zu App Store Connect hochladen (TestFlight).
+    : "${ASC_KEY_PATH:?ASC_KEY_PATH=/pfad/zu/AuthKey_XXXXXXXX.p8 noetig}"
+    : "${ASC_KEY_ID:?ASC_KEY_ID (Schluessel-ID aus App Store Connect) noetig}"
+    : "${ASC_ISSUER_ID:?ASC_ISSUER_ID (Issuer-ID aus App Store Connect) noetig}"
+    ARC="$HOME/Library/Developer/Xcode/Archives/$(date +%Y-%m-%d)/App-$(date +%H.%M.%S).xcarchive"
+    mkdir -p "$(dirname "$ARC")"
+    xcodebuild "${XC_ARGS_TF[@]}" -destination 'generic/platform=iOS' \
+      -archivePath "$ARC" archive
+    xcodebuild -exportArchive -archivePath "$ARC" \
+      -exportOptionsPlist tools/export_testflight.plist \
+      -authenticationKeyPath "$ASC_KEY_PATH" -authenticationKeyID "$ASC_KEY_ID" \
+      -authenticationKeyIssuerID "$ASC_ISSUER_ID" -allowProvisioningUpdates
+    echo "==> Build hochgeladen. App Store Connect -> Testen -> Build frueheren Testern zuweisen."
+    ;;
   *)
-    echo "Unbekannter Modus: $MODE (erlaubt: device | ipa | sim)" >&2; exit 1 ;;
+    echo "Unbekannter Modus: $MODE (erlaubt: device | sim | ipa | testflight | testflight-upload)" >&2
+    exit 1 ;;
 esac

@@ -1,0 +1,19 @@
+{
+  "" : {
+    "diagnostics" : "/Users/cp/Documents/Python/Music_Player/build_ios/DerivedData/Build/Intermediates.noindex/Pods.build/Debug-iphoneos/BeatclipMedia.build/Objects-normal/arm64/BeatclipMedia-primary.dia",
+    "emit-module-dependencies" : "/Users/cp/Documents/Python/Music_Player/build_ios/DerivedData/Build/Intermediates.noindex/Pods.build/Debug-iphoneos/BeatclipMedia.build/Objects-normal/arm64/BeatclipMedia-primary-emit-module.d",
+    "emit-module-diagnostics" : "/Users/cp/Documents/Python/Music_Player/build_ios/DerivedData/Build/Intermediates.noindex/Pods.build/Debug-iphoneos/BeatclipMedia.build/Objects-normal/arm64/BeatclipMedia-primary-emit-module.dia",
+    "pch" : "/Users/cp/Documents/Python/Music_Player/build_ios/DerivedData/Build/Intermediates.noindex/Pods.build/Debug-iphoneos/BeatclipMedia.build/Objects-normal/arm64/BeatclipMedia-primary-Bridging-header.pch",
+    "swift-dependencies" : "/Users/cp/Documents/Python/Music_Player/build_ios/DerivedData/Build/Intermediates.noindex/Pods.build/Debug-iphoneos/BeatclipMedia.build/Objects-normal/arm64/BeatclipMedia-primary.swiftdeps"
+  },
+  "/Users/cp/Documents/Python/Music_Player/plugins/beatclip-media/ios/Sources/BeatClipMediaPlugin.swift" : {
+    "const-values" : "/Users/cp/Documents/Python/Music_Player/build_ios/DerivedData/Build/Intermediates.noindex/Pods.build/Debug-iphoneos/BeatclipMedia.build/Objects-normal/arm64/BeatClipMediaPlugin.swiftconstvalues",
+    "dependencies" : "/Users/cp/Documents/Python/Music_Player/build_ios/DerivedData/Build/Intermediates.noindex/Pods.build/Debug-iphoneos/BeatclipMedia.build/Objects-normal/arm64/BeatClipMediaPlugin.d",
+    "diagnostics" : "/Users/cp/Documents/Python/Music_Player/build_ios/DerivedData/Build/Intermediates.noindex/Pods.build/Debug-iphoneos/BeatclipMedia.build/Objects-normal/arm64/BeatClipMediaPlugin.dia",
+    "index-unit-output-path" : "/Pods.build/Debug-iphoneos/BeatclipMedia.build/Objects-normal/arm64/BeatClipMediaPlugin.o",
+    "llvm-bc" : "/Users/cp/Documents/Python/Music_Player/build_ios/DerivedData/Build/Intermediates.noindex/Pods.build/Debug-iphoneos/BeatclipMedia.build/Objects-normal/arm64/BeatClipMediaPlugin.bc",
+    "object" : "/Users/cp/Documents/Python/Music_Player/build_ios/DerivedData/Build/Intermediates.noindex/Pods.build/Debug-iphoneos/BeatclipMedia.build/Objects-normal/arm64/BeatClipMediaPlugin.o",
+    "swift-dependencies" : "/Users/cp/Documents/Python/Music_Player/build_ios/DerivedData/Build/Intermediates.noindex/Pods.build/Debug-iphoneos/BeatclipMedia.build/Objects-normal/arm64/BeatClipMediaPlugin.swiftdeps",
+    "swiftmodule" : "/Users/cp/Documents/Python/Music_Player/build_ios/DerivedData/Build/Intermediates.noindex/Pods.build/Debug-iphoneos/BeatclipMedia.build/Objects-normal/arm64/BeatClipMediaPlugin~partial.swiftmodule"
+  }
+}

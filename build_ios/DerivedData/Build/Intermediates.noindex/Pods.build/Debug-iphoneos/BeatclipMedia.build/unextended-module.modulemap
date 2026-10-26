@@ -1,0 +1,10 @@
+framework module BeatclipMedia {
+  umbrella header "BeatclipMedia-umbrella.h"
+
+  export *
+  module * { export * }
+}
+
+module BeatclipMedia.__Swift {
+  exclude header "BeatclipMedia-Swift.h"
+}

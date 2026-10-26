@@ -40,6 +40,45 @@ läuft die App **7 Tage** (danach neu bauen/signieren); einem bezahlten
 Apple-Developer-Konto (99 $/Jahr) gehören 1-Jahr-Ad-hoc-Signaturen und **TestFlight**
 (Verteilung an bis zu 10.000 Tester, ohne USB).
 
+### Variante D: TestFlight (verteilt über App Store Connect, ohne USB)
+```bash
+npm run ios:testflight      # = ./tools/build_ios.sh testflight
+```
+Das Skript baut das **Release-Archiv** und legt es im Organizer-Ordner von Xcode ab
+(`~/Library/Developer/Xcode/Archives/<Datum>/App-<Zeit>.xcarchive`). Danach in Xcode:
+
+1. **Fenster → Organizer** → oberstes Eintrag → **Distribute App…**
+2. **App Store Connect** → **Upload**, Signing *Automatically managed* – Xcode erzeugt das
+   Apple-Distribution-Zertifikat und das App-Store-Profil beim ersten Mal automatisch.
+3. App Store Connect → *Builds* → Build für das **interne Testtesting** auswählen → Tester
+   per E-Mail (bis zu 100 interne) oder per Link (bis zu 10.000 externe, mit Review).
+
+**Ohne Xcode-GUI** (Archiv + Export + Upload in einem Schritt) – dafür ein Team-Key unter
+*App Store Connect → Benutzer und Zugriffe → Integrationen → App Store Connect API*
+(Rolle *Entwickler* genügt), `.p8` einmalig heruntergeladen:
+
+```bash
+ASC_KEY_PATH=~/AuthKey_ABCDEF1234.p8 \
+ASC_KEY_ID=ABCDEF1234 \
+ASC_ISSUER_ID=0f1a2b3c-4d5e-6f70-8192-a3b4c5d6e7f8 \
+  npm run ios:testflight:upload
+```
+
+Export-Einstellungen stehen in [`tools/export_testflight.plist`](tools/export_testflight.plist)
+(`method: app-store-connect`, `destination: upload`, `teamID: CH9M2M9R7N`). Das Skript legt
+das Archiv wie oben ab und lädt den Build danach direkt hoch. Ein bereits fertig
+signiertes .ipa (App-Store-Profil) liegt in [`dist/ios/`](dist/ios/) – alternativ damit die
+Mac-App **Transporter** zum Hochladen verwenden.
+
+**Version/Build** kommen aus `ios/App/App.xcodeproj` (`MARKETING_VERSION`,
+`CURRENT_PROJECT_VERSION`) und halten zu `app/app.js` (`APP_VER`/`APP_BUILD`) und
+`android/app/build.gradle` (aktuell **1.2.5**, Build **9**). App Store Connect weist einen
+Upload ab, wenn die Build-Nummer innerhalb derselben Version schon vergeben ist – dann
+`CURRENT_PROJECT_VERSION` erhöhen und neu archivieren. Beim ersten Upload fragt
+App Store Connect nach der **Export Compliance**; die App nutzt nur Standard-TLS, die
+Antwort lautet „nein“ (dauerhaft abkürzbar mit `ITSAppUsesNonExemptEncryption = false`
+in `ios/App/App/Info.plist`).
+
 ### Update einer vorhandenen Installation
 Solange mit demselben Team signiert wird, bleibt beim Drüberinstallieren alles erhalten
 (Bibliotheken, Schnitte – sie liegen im App-Sandbox-Speicher).
@@ -57,7 +96,7 @@ Voraussetzungen, einmalig:
 npm install
 npm run assets:ios   # AppIcon + Splash neu erzeugen (reines Node-Skript)
 npm run sync:ios     # app/ -> ios/App/App/public, Plugin-Pods, packageClassList
-./tools/build_ios.sh sim | device | ipa
+./tools/build_ios.sh sim | device | ipa | testflight
 ```
 
 Unter Windows/macOS gleich: Alles, was **keinen** iOS-Toolchain braucht (Web-UI,
@@ -122,6 +161,16 @@ Auch Now-Playing-Seeking und die Headset-Tasten stoppen bzw. springen innerhalb 
   Capacitor-Pods neu compiliert haben will.
 - Push-Benachrichtigungen braucht BeatClip nicht; die Medienleiste ist davon unabhängig.
 
+### Fehlerbehebung
+- **„Unable to resolve module dependency: 'Capacitor' / 'BeatclipMedia'“** in
+  `AppDelegate.swift`: in Xcode ist **`App.xcodeproj` statt `App.xcworkspace`** geöffnet.
+  Ohne das Workspace fehlt `Pods/Pods.xcodeproj`, also werden Capacitor und das
+  Plugin `BeatclipMedia` nie gebaut – das Projekt lässt sich dann weder bauen noch
+  archivieren. Richtig öffnen: `npm run ios:open` (oder `open ios/App/App.xcworkspace`),
+  altes Xcode-Fenster vorher schließen.
+- Derselbe Fehler nach `npm ci`/`git clean`: Pods fehlen → `npx cap sync ios`, dann
+  `pod install` in `ios/App/` (macht beides automatisch `tools/build_ios.sh`).
+
 ---
 
 ## 5. Projektstruktur (iOS-bezogen)
@@ -129,7 +178,7 @@ Auch Now-Playing-Seeking und die Headset-Tasten stoppen bzw. springen innerhalb 
 ios/                       Capacitor-iOS-Projekt (App.xcworkspace, Podfile, Info.plist, AppDelegate)
 plugins/beatclip-media/    lokales Capacitor-Plugin: Swift-Bruecke + BeatclipMedia.podspec
 tools/make_ios_assets.js   AppIcon + Splash fuer ios/App/App/Assets.xcassets
-tools/build_ios.sh         Build-Anleitung/Ablauf auf dem Mac (sim | device | ipa)
+tools/build_ios.sh         Build-Anleitung/Ablauf auf dem Mac (sim | device | ipa | testflight)
 dist/ios/                  Ziel fuer gebaute .ipa (hier nicht gebaut)
 ```
 Der Rest (Web-UI, Android-Projekt, Signing) steht in [README-ANDROID.md](README-ANDROID.md).

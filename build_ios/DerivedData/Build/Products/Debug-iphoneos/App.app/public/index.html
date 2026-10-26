@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+<!-- Titel & Beschreibung werden zur Laufzeit übersetzt (translations.js → app.title / app.description) -->
+<title>BeatClip – Offline Music Player</title>
+<meta name="description" content="Offline music player with editing: start/end per playlist track.">
+<meta name="theme-color" content="#00b8a9">
+
+<!-- iOS / iPadOS -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="BeatClip">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+
+<!-- PWA -->
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png" type="image/png">
+
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+
+  <!-- App-Leiste -->
+  <header class="appbar" id="appbar">
+    <div class="abRow">
+      <button class="iconBtn ghost" id="btnBack" data-act="back" hidden>←</button>
+      <div class="abTitle">
+        <h1 id="abTitle">BeatClip</h1>
+        <div class="abSub" id="abSub" data-i18n="app.tagline">Offline music player with cut editing</div>
+      </div>
+      <button class="iconBtn ghost" id="btnInstall" data-act="install" data-i18n-title="install.title" title="Install app" hidden>⤓</button>
+      <button class="iconBtn ghost" data-act="theme" id="btnTheme" data-i18n-title="set.theme_toggle" title="Light/Dark">🌙</button>
+    </div>
+    <div class="abMeta">
+      <span id="abFolder" class="mono">📁 0 Titel</span>
+      <span class="spacer"></span>
+      <span class="pill pillBt" id="pillBt" data-i18n-title="bt.output_tooltip" title="Bluetooth audio output">🔊 <span id="btLabel" data-i18n="bt.speaker">Speaker</span></span>
+    </div>
+  </header>
+
+  <!-- Screens -->
+  <main class="screens">
+    <section class="screen active" id="s-home"></section>
+    <section class="screen" id="s-playlists"></section>
+    <section class="screen" id="s-pl"></section>
+    <section class="screen" id="s-library"></section>
+    <section class="screen" id="s-set"></section>
+    <section class="screen" id="s-player"></section>
+    <section class="screen" id="s-about"></section>
+  </main>
+
+  <!-- Mini-Player -->
+  <div class="mini" id="mini" hidden>
+    <div class="miniTop" data-act="go-player">
+      <div class="miniCover" id="miniCover">🎵</div>
+      <div class="miniInfo">
+        <div class="t" id="miniTitle">–</div>
+        <div class="s" id="miniSub">–</div>
+      </div>
+      <button class="miniPlay" id="miniPlay" data-act="toggle-play" data-i18n-aria="player.playpause" aria-label="Playback">▶</button>
+    </div>
+    <div class="miniBar"><i id="miniBarFill"></i></div>
+  </div>
+
+  <!-- Bottom-Navigation -->
+  <nav class="bottomnav">
+    <button class="nav active" data-nav="home"><span class="i">🏠</span><span data-i18n="nav.home">Home</span></button>
+    <button class="nav" data-nav="playlists"><span class="i">🎶</span><span data-i18n="nav.playlists">Playlists</span></button>
+    <span class="fabSlot"><button class="fab" data-act="fab-cut" data-i18n-title="cut.set" data-i18n-aria="cut.set" title="Set cut" aria-label="Set cut">✂</button></span>
+    <button class="nav" data-nav="library"><span class="i">📁</span><span data-i18n="nav.library">Library</span></button>
+    <button class="nav" data-nav="set"><span class="i">⚙️</span><span data-i18n="nav.settings">Settings</span></button>
+  </nav>
+
+  <!-- Overlay / Bottom-Sheet / Toast -->
+  <div class="overlay" id="overlay"></div>
+  <div class="sheet" id="sheet"></div>
+  <div class="toast" id="toast" role="status"></div>
+
+  <!-- Datei-Import -->
+  <!-- bewusst OHNE accept: Android/WebView filtert nur nach MIME-Typen und blendet
+       .m4a-Dateien (oft als video/mp4 oder unbekannt gemeldet) sonst komplett aus.
+       Die Formate werden beim Import in app.js geprüft. -->
+  <input type="file" id="filePick" multiple hidden>
+
+  <!-- Wiedergabe-Engine (ein MediaElement = beste Bluetooth-/Sperrbildschirm-Routing-Kompatibilität) -->
+  <audio id="audio" preload="auto"></audio>
+</div>
+
+<script src="vendor/lamejs.iife.js"></script>
+<script src="translations.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

@@ -28,11 +28,6 @@
 			</array>
 		</dict>
 	</array>
-	<!-- BeatClip kopiert "Öffnen in"-Dateien in die Sandbox (Documents/shared) und
-	     oeffnet sie nicht in der Original-Position; kein UIDocumentBrowserViewController.
-	     Damit ist die von Apple geforderte Document-Konfiguration erfuellt. -->
-	<key>LSSupportsOpeningDocumentsInPlace</key>
-	<false/>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -47,9 +42,12 @@
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
-	<!-- iOS 26+/27 verlangt den UIScene-Lifecycle; ohne dieses Manifest crasht
-	     die App beim Start (SIGTRAP NoSceneLifecycleAdoption). Der SceneDelegate
-	     erzeugt das Fenster aus dem Main-Storyboard (BridgeViewController). -->
+	<key>LSRequiresIPhoneOS</key>
+	<true/>
+	<key>LSSupportsOpeningDocumentsInPlace</key>
+	<false/>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>BeatClip benötigt das Mikrofon, um Audioaufnahmen zu erstellen und lokal zu speichern.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
@@ -67,10 +65,6 @@
 			</array>
 		</dict>
 	</dict>
-	<key>LSRequiresIPhoneOS</key>
-	<true/>
-	<key>NSMicrophoneUsageDescription</key>
-	<string>BeatClip benötigt das Mikrofon, um Audioaufnahmen zu erstellen und lokal zu speichern.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>audio</string>
