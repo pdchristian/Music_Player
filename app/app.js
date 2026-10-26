@@ -14,7 +14,7 @@
    (BeatClipMedia.appInfo) – die Konstanten dienen nur als Fallback (PWA, iOS ohne
    Plugin-Antwort) und sollten mit android/app/build.gradle bzw. ios/…/project.pbxproj
    mitlaufen. */
-let APP_VER = "1.2.2", APP_BUILD = 6;
+let APP_VER = "1.2.5", APP_BUILD = 9;
 
 /* ─────────────────────────── Utils ───────────────────────────────────── */
 const $  = s => document.querySelector(s);
@@ -715,7 +715,8 @@ async function playItem(qItem, plId){
     t.dur = audio.duration; idbPut("tracks", t);
   }
   try{ audio.currentTime = clamp(from, 0, audio.duration); }catch(e){}
-  fadingOut = false; // manueller Trackwechsel waehrend eines laufenden Fade-Outs
+  cutEndGuard = false; // manueller Trackwechsel waehrend eines laufenden Uebergangs
+  if (state.settings.fade > 0) audio.volume = 0; // Fade-In beginnt bei 0, kein Klick an der Kante
   try{ await audio.play(); }
   catch(e){ // Autoplay-Sperre o. A.: nicht mit stummer Wiedergabe/0 % Volume enden
     state.player.playing = false; audio.volume = state.settings.volume;
@@ -726,7 +727,7 @@ async function playItem(qItem, plId){
     t.dur = audio.duration; idbPut("tracks", t);
   }
   t.lastPlay = Date.now(); idbPut("tracks", t);
-  if (fadeOutIv){ clearInterval(fadeOutIv); fadeOutIv = 0; } // laufenden Fade-Out nicht auf den neuen Track weiterlaufen lassen
+  stopFadeOut(false); clearTimeout(fadeWatchdog); // laufenden Fade-Out nicht auf den neuen Track weiterlaufen lassen
   armEndWatchdog();
   setupIOSAudioSession();
   updateMediaSession();
@@ -736,6 +737,7 @@ async function playItem(qItem, plId){
 }
 function armEndWatchdog(){
   clearTimeout(endWatchdog);
+  armFadeWatchdog();
   const s = span(); if (!s) return;
   const ahead = Math.max(0.05, s.end - audio.currentTime - 0.05);
   endWatchdog = setTimeout(() => {
@@ -745,15 +747,17 @@ function armEndWatchdog(){
   }, ahead*1000);
 }
 function stopPlayback(){
-  audio.pause(); state.player.playing = false; fadingOut = false;
+  stopFadeOut(true); clearTimeout(fadeWatchdog); cutEndGuard = false;
+  audio.pause(); state.player.playing = false;
   nativeStopSession(); renderMini(); refreshCurrent();
 }
 function onCutEnd(){
   // Guard: loop()+timeupdate+ended+Watchdog koennten onCutEnd mehrfach feuern.
-  if (fadingOut) return;
+  if (cutEndGuard) return;
+  cutEndGuard = true;
   const done = track(state.player.trackId);
   if (state.settings.repeat === "one"){
-    const s = span(); audio.currentTime = s.start; armEndWatchdog(); return;
+    const s = span(); audio.currentTime = s.start; armEndWatchdog(); cutEndGuard = false; return;
   }
   // "once" hält nach diesem Titel an; "off" hält am Ende der Playlist an.
   const stopHere = repeatMode() === "once" ||
@@ -763,9 +767,9 @@ function onCutEnd(){
     toast(T("toast.cut_end_stop", { title:done ? done.title : "", end:mmssPrecise(span().end) }));
     return;
   }
-  // Fade-Out vor dem Uebergang, damit es an der Schnittkante nicht hart abschneidet.
-  fadingOut = true;
-  fadeOutThen(() => { fadingOut = false; nextTrack(false); });
+  // Der Fade-Out wurde schon vor dem Schnitt-Ende gestartet (startFadeTo) und hat die
+  // Lautstaerke exakt auf 0 gezogen – hier wird nur noch bei 0 uebergegangen, unhoerbar.
+  nextTrack(false);
   toast(T("toast.cut_end_next", { title:done ? done.title : "", end:mmssPrecise(span().end) }));
 }
 async function nextTrack(manual){
@@ -800,6 +804,7 @@ async function prevTrack(){
   playItem(state.queue[idx], currentItem()?.pl.id);
 }
 async function togglePlay(){
+  cutEndGuard = false;
   if (!state.player.trackId){
     const pl = state.playlists.find(p => p.items.length);
     if (pl && pl.items.length) return playQueue(pl.id, pl.items[0].id);
@@ -813,29 +818,57 @@ async function togglePlay(){
   else nativeSync(true);
   renderMini(); refreshCurrent();
 }
-/* Blendzeit an den Schnittkanten (dezenter Gain-Ramp über audio.volume) */
-let fadeInIv = 0, fadeOutIv = 0, fadingOut = false;
+/* Blendzeit an den Schnittkanten (dezente Gain-Rampen über audio.volume):
+   Der Fade-Out beginnt VOR dem Schnitt-Ende und trifft dort exakt 0 – bei Fade 4 s
+   und Ende 1:19 laeuft die Rampe von 1:15 bis 1:19; es wird KEIN Audio ueber die
+   Schnittkante hinaus angehaengt. Gestoppt wird ebenfalls stufenlos bei 0. */
+let fadeInIv = 0, fadeOutIv = 0, fadeEndT = -1, fadeWatchdog = null, cutEndGuard = false;
+/* Nie laenger als die halbe Schnittlaenge – Fade-In und -Out ueberlappen nie. */
+function effFade(s){ return Math.min(state.settings.fade, s.len/2); }
 function fadeIn(){
-  const target = state.settings.volume, d = Math.max(.05, state.settings.fade);
+  const s = span();
+  const target = state.settings.volume, d = Math.max(.05, s ? effFade(s) : state.settings.fade);
   const t0 = performance.now();
   if (fadeInIv){ clearInterval(fadeInIv); fadeInIv = 0; }
-  if (fadeOutIv){ clearInterval(fadeOutIv); fadeOutIv = 0; } // Fade-In winning, nie gegen einen laufenden Fade-Out schreiben
+  if (fadeOutIv){ clearInterval(fadeOutIv); fadeOutIv = 0; fadeEndT = -1; } // Fade-In gewinnt, nie gegen einen laufenden Fade-Out schreiben
   fadeInIv = setInterval(() => {
     const p = (performance.now()-t0)/(d*1000);
     if (p >= 1){ audio.volume = target; clearInterval(fadeInIv); fadeInIv = 0; return; }
     if (!audio.paused) audio.volume = target*p;
   }, 40);
 }
-function fadeOutThen(cb){
-  if (!(state.settings.fade > 0)){ cb(); return; }
-  const d = Math.max(.05, state.settings.fade);
+/* Rampe von der aktuellen Lautstaerke auf 0, fertig exakt am aktuellen Schnitt-Ende. */
+function startFadeTo(){
+  const s = span(); if (!s) return;
+  const d = Math.max(.05, s.end - audio.currentTime);
   const target = state.settings.volume, t0 = performance.now();
+  fadeEndT = s.end;
   if (fadeOutIv){ clearInterval(fadeOutIv); fadeOutIv = 0; }
   fadeOutIv = setInterval(() => {
     const p = (performance.now()-t0)/(d*1000);
-    if (p >= 1){ clearInterval(fadeOutIv); fadeOutIv = 0; audio.volume = 0; cb(); return; }
-    audio.volume = target*(1-p);
+    if (p >= 1){ clearInterval(fadeOutIv); fadeOutIv = 0; audio.volume = 0; return; }
+    if (!audio.paused) audio.volume = target*(1-p);
   }, 40);
+}
+function stopFadeOut(restore){
+  if (fadeOutIv){ clearInterval(fadeOutIv); fadeOutIv = 0; }
+  fadeEndT = -1;
+  if (restore) audio.volume = state.settings.volume;
+}
+/* Fade-Start zeitlich vorm Schnitt-Ende anstossen – auch im Hintergrund, wo rAF/loop ruht. */
+function armFadeWatchdog(){
+  clearTimeout(fadeWatchdog);
+  const s = span(); if (!s) return;
+  const d = effFade(s);
+  if (d <= 0){ stopFadeOut(true); return; }
+  const ahead = s.end - d - audio.currentTime;
+  if (ahead < 0){
+    if (!fadeOutIv && state.player.playing && !audio.paused && audio.currentTime < s.end - 0.03) startFadeTo();
+    return;
+  }
+  fadeWatchdog = setTimeout(() => {
+    if (state.player.playing && !audio.paused && !fadeOutIv) startFadeTo();
+  }, ahead*1000);
 }
 
 /* Ende des Schnitts zuverlässig erkennen: rAF + timeupdate + Watchdog */
@@ -843,6 +876,14 @@ let lastPos = -1, lastAdvance = 0, stalledNotified = false;
 function loop(){
   if (state.player.playing && !audio.paused){
     const s = span();
+    if (s){
+      const d = effFade(s);
+      // Seek oder Schnitt-/Einstellungen-Aenderung: laufende Rampe neu bewerten.
+      if (fadeOutIv && (Math.abs(s.end - fadeEndT) > 0.01 ||
+          audio.currentTime < s.end - d - 0.06)) stopFadeOut(true);
+      if (!fadeOutIv && d > 0 && audio.currentTime >= s.end - d &&
+          audio.currentTime < s.end - 0.03) startFadeTo();
+    }
     if (s && audio.currentTime >= s.end - 0.02){ onCutEnd(); }
     else {
       if (!lastAdvance) lastAdvance = performance.now();
@@ -866,7 +907,11 @@ function loop(){
 }
 audio.addEventListener("timeupdate", () => { const s = span(); if (s && audio.currentTime >= s.end - 0.02) onCutEnd(); });
 audio.addEventListener("ended", () => onCutEnd());
-audio.addEventListener("pause", () => { if (state.player.playing){ state.player.playing = false; renderMini(); refreshCurrent(); } syncCutPlayBtn(); });
+audio.addEventListener("pause", () => {
+  stopFadeOut(true); // Pause in der Fade-Zone: Volume restaurieren, loop fadelt bei Bedarf neu
+  if (state.player.playing){ state.player.playing = false; renderMini(); refreshCurrent(); }
+  syncCutPlayBtn();
+});
 audio.addEventListener("play",  () => { if (!state.player.playing){ state.player.playing = true; renderMini(); refreshCurrent(); } syncCutPlayBtn(); });
 
 audio.addEventListener("error", () => {
@@ -1490,8 +1535,10 @@ function drawPlayerTimeline(){
   const s = span(); if (!s) return;
   drawWave(cv, tl.clientWidth, tl.clientHeight, state.player.trackId, s);
   const dur = (audio.duration && isFinite(audio.duration)) ? audio.duration : (s.dur || 1);
-  $("#hStart").style.left = (s.start/dur*100) + "%";
-  $("#hEnd").style.left = (s.end/dur*100) + "%";
+  // Klemmen: bei 0 % / 100 % haette die Haelfte der Handle-Linie overflow:hidden des Containers abgeschnitten.
+  // Ueber tl suchen: die Griffe stecken auch im Schnitt-Sheet, globale IDs waeren mehrdeutig.
+  tl.querySelector("#hStart").style.left = clamp(s.start/dur*100, 0.6, 99.4) + "%";
+  tl.querySelector("#hEnd").style.left = clamp(s.end/dur*100, 0.6, 99.4) + "%";
   $("#pHead").style.left = clamp(audio.currentTime/dur*100, 0, 100) + "%";
 }
 
@@ -1557,8 +1604,8 @@ async function openCutEditor(trackId, plId){
       ' · <span id="sheetBuild">v' + APP_VER + " Build " + APP_BUILD + '</span></div>' +
     '<div class="waveWrap" id="wWaveWrap">' +
     '<canvas id="wWave"></canvas>' +
-    '<div class="handle" id="hStart"><i></i><span>S</span></div>' +
-    '<div class="handle" id="hEnd"><i></i><span>E</span></div>' +
+    '<div class="handle" id="edHStart"><i></i><span>S</span></div>' +
+    '<div class="handle" id="edHEnd"><i></i><span>E</span></div>' +
     '<div class="playhead" id="wHead"></div>' +
     '</div>' +
     '<div class="cutInfo">' +
@@ -1635,8 +1682,8 @@ function updateEditorHead(){
   const t = track(state.ui.editTrack);
   const wrap = $("#wWaveWrap"); if (!wrap) return;
   const dur = t.dur || 1;
-  $("#hStart").style.left = (it.cut.start/dur*100) + "%";
-  $("#hEnd").style.left = (it.cut.end/dur*100) + "%";
+  $("#edHStart").style.left = clamp(it.cut.start/dur*100, 0.6, 99.4) + "%";
+  $("#edHEnd").style.left = clamp(it.cut.end/dur*100, 0.6, 99.4) + "%";
   const cur = state.player.trackId === state.ui.editTrack ? audio.currentTime : -1;
   $("#wHead").style.display = cur >= 0 ? "block" : "none";
   if (cur >= 0) $("#wHead").style.left = clamp(cur/dur*100, 0, 100) + "%";
@@ -1735,8 +1782,8 @@ document.addEventListener("pointermove", e => {
   const all = state.playlists.flatMap(p => p.items).find(i => i.id === d.itemLocalId);
   if (!all) return;
   if (!all.cut) all.cut = { start:0, end:dur };
-  if (d.el === "hStart") all.cut.start = clamp(sec, 0, all.cut.end - 2);
-  else                   all.cut.end   = clamp(sec, all.cut.start + 2, dur);
+  if (d.el === "hStart" || d.el === "edHStart") all.cut.start = clamp(sec, 0, all.cut.end - 2);
+  else                                           all.cut.end   = clamp(sec, all.cut.start + 2, dur);
   d.moved = true;
   if (d.scope === "player"){
     if (state.player.trackId === d.trackId)
