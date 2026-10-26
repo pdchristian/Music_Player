@@ -9,6 +9,10 @@
 #
 # Aufruf:
 #   ./tools/build_ios.sh              Debug-Build, direkt aufs iPhone (xcodebuild + devicectl)
+#   ./tools/build_ios.sh clean        Nur Xcode-Caches zuruecksetzen (IDE-Fehler
+#                                     "Unable to resolve module dependency: 'Capacitor'")
+#   CLEAN=1 ./tools/build_ios.sh ...  Caches vor dem Build zuruecksetzen
+#   ./tools/ios_fix.sh                Caches + Pods erneuern und App.xcworkspace oeffnen
 #   ./tools/build_ios.sh ipa          Ad-hoc-.ipa fuer dist/ios (Signing-Nachweise noetig, s.u.)
 #   ./tools/build_ios.sh sim          Build+Start im iOS-Simulator
 #   ./tools/build_ios.sh testflight   Release-Archiv fuer TestFlight (liegt im Xcode-Organizer)
@@ -38,6 +42,12 @@ MODE="${1:-device}"
 TEAM_ID="${TEAM_ID:-}"          # z.B. ABCDEFG123; leer = Xcode-Automatik
 BUILDDIR="build_ios"
 
+# Nur-Caches-Modus: kein npm/pod/xcodebuild, nur Xcode-Caches weg.
+if [ "$MODE" = "clean" ]; then
+  ./tools/ios_clean.sh
+  exit 0
+fi
+
 echo "==> npm ci"
 npm ci
 
@@ -49,6 +59,13 @@ npx cap sync ios
 
 echo "==> pod install"
 (cd ios/App && pod install)
+
+# Ziel-Abhaengigkeit App -> Pods-App auffrischen (damit auch App.xcodeproj allein baut).
+node tools/ios_pods_dependency.js
+
+# CLEAN=1: veraltete Xcode-Caches (Modul-Cache, Index) vor dem Build entsorgen, damit auch der
+# IDE-Index danach wieder Capacitor/BeatclipMedia findet.
+if [ -n "${CLEAN:-}" ]; then ./tools/ios_clean.sh; fi
 
 mkdir -p "$BUILDDIR" dist/ios
 
@@ -141,6 +158,6 @@ PLIST
     echo "==> Build hochgeladen. App Store Connect -> Testen -> Build frueheren Testern zuweisen."
     ;;
   *)
-    echo "Unbekannter Modus: $MODE (erlaubt: device | sim | ipa | testflight | testflight-upload)" >&2
+    echo "Unbekannter Modus: $MODE (erlaubt: device | sim | ipa | testflight | testflight-upload | clean)" >&2
     exit 1 ;;
 esac

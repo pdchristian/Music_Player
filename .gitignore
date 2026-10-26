@@ -8,3 +8,17 @@
 
 # Gradle-Wrappercache, falls jemals unter einem anderen Pfad erzeugt
 **/gradle/wrapper/dists/
+
+# Xcode-Build-Artefakte (Mac): regenerierbar, maschinen-spezifisch und gefaehrlich, wenn sie
+# per Git zwischen Windows- und Mac-Arbeitsplatz wandern — Xcode indexet dann Fremd-Caches und
+# meldet "Unable to resolve module dependency: 'Capacitor'/'BeatclipMedia'".
+build_ios/DerivedData/
+build_ios/ModuleCache.noindex/
+build_ios/*.xcarchive/
+build_ios/export_adhoc.plist
+
+# Xcode-Benutzerzustand und macOS-Ordnermetadata
+**/xcuserdata/
+**/.DS_Store
+
+build_ios/ide_warm.log

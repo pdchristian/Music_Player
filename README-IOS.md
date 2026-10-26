@@ -72,7 +72,7 @@ Mac-App **Transporter** zum Hochladen verwenden.
 
 **Version/Build** kommen aus `ios/App/App.xcodeproj` (`MARKETING_VERSION`,
 `CURRENT_PROJECT_VERSION`) und halten zu `app/app.js` (`APP_VER`/`APP_BUILD`) und
-`android/app/build.gradle` (aktuell **1.2.5**, Build **9**). App Store Connect weist einen
+`android/app/build.gradle` (aktuell **1.3.0**, Build **10**). App Store Connect weist einen
 Upload ab, wenn die Build-Nummer innerhalb derselben Version schon vergeben ist – dann
 `CURRENT_PROJECT_VERSION` erhöhen und neu archivieren. Beim ersten Upload fragt
 App Store Connect nach der **Export Compliance**; die App nutzt nur Standard-TLS, die
@@ -97,7 +97,11 @@ npm install
 npm run assets:ios   # AppIcon + Splash neu erzeugen (reines Node-Skript)
 npm run sync:ios     # app/ -> ios/App/App/public, Plugin-Pods, packageClassList
 ./tools/build_ios.sh sim | device | ipa | testflight
+CLEAN=1 ./tools/build_ios.sh device   # vorher alle Xcode-Caches zurücksetzen
 ```
+
+Wenn Xcode rote Fehler anzeigt, der Build aber durchläuft → `npm run ios:fix`
+(Caches löschen, Assets/`cap sync`/`pod install` erneuern, **`App.xcworkspace`** öffnen).
 
 Unter Windows/macOS gleich: Alles, was **keinen** iOS-Toolchain braucht (Web-UI,
 Assets, Podfile-Einträge, Plugin-Registrierung), passiert bereits per `npm run sync:ios`
@@ -163,13 +167,31 @@ Auch Now-Playing-Seeking und die Headset-Tasten stoppen bzw. springen innerhalb 
 
 ### Fehlerbehebung
 - **„Unable to resolve module dependency: 'Capacitor' / 'BeatclipMedia'“** in
-  `AppDelegate.swift`: in Xcode ist **`App.xcodeproj` statt `App.xcworkspace`** geöffnet.
-  Ohne das Workspace fehlt `Pods/Pods.xcodeproj`, also werden Capacitor und das
-  Plugin `BeatclipMedia` nie gebaut – das Projekt lässt sich dann weder bauen noch
-  archivieren. Richtig öffnen: `npm run ios:open` (oder `open ios/App/App.xcworkspace`),
-  altes Xcode-Fenster vorher schließen.
+  `AppDelegate.swift` (Build schlägt fehl, `xcodebuild` läuft aber durch): das Projekt hatte
+  keine Ziel-Abhängigkeit auf `Pods-App`, deshalb wurden die Pods nur über das Workspace gebaut.
+  Diese Abhängigkeit ist jetzt in `ios/App/App.xcodeproj` eingetragen – **beide** Einstiegspunkte
+  (`App.xcworkspace` *und* `App.xcodeproj`) bauen und archivieren damit. `node tools/ios_pods_dependency.js`
+  erneuert die darin hinterlegte Ziel-ID nach jedem `pod install` (macht `build_ios.sh`/`ios_fix.sh` automatisch).
+  Empfehlungsweise bleibt trotzdem, das Workspace zu öffnen: `npm run ios:open`
+  (oder `open ios/App/App.xcworkspace`).
 - Derselbe Fehler nach `npm ci`/`git clean`: Pods fehlen → `npx cap sync ios`, dann
   `pod install` in `ios/App/` (macht beides automatisch `tools/build_ios.sh`).
+- Derselbe Fehler, obwohl `./tools/build_ios.sh` erfolgreich baut (**BUILD SUCCEEDED**): das ist
+  nur der **IDE-Index** in Xcode. Ursache sind veraltete Caches – früher lagen
+  `build_ios/DerivedData/` (Modul-Cache, Header-Maps, Index) im Git und wanderten zwischen
+  Windows- und Mac-Arbeitsplatz mit; Xcode indexet dann Fremd-Caches. Diese Artefakte sind jetzt
+  ignoriert. Einmalig bereinigen: `npm run ios:fix` (oder nur Caches: `npm run ios:clean`,
+  alternativ `DEEP=1 npm run ios:clean` für den globalen Modul-Cache).
+- `npm run ios:fix` löscht die Caches, erneuert Assets/`cap sync`/`pod install`, **baut einmal
+  vorbeugend** (Workspace und `App.xcodeproj`, Simulator-Konfiguration) und öffnet dann das
+  Workspace – dabei geschlossene bzw. wiederhergestellte `App.xcodeproj`-Fenster werden
+  automatisch geschlossen. Ohne Vorab-Build: `NOWARM=1 npm run ios:fix`.
+- Der Ordner `ios/App/App.xcodeproj/xcshareddata/xcschemes/App.xcscheme` enthält ein geteiltes
+  „App“-Schema, damit `xcodebuild -scheme App` auch auf einem frischen Mac-Klon funktioniert.
+- Warnung `Run script build phase '[CP] Embed Pods Frameworks' will be run during every build
+  because it does not specify any outputs`: bewusst erzeugt durch `install! 'cocoapods',
+  :disable_input_output_paths => true` im Podfile (Capacitor-Vorgabe, verhindert falsch
+  eingebettete Plugin-Frameworks nach einem Update) – kann ignoriert werden.
 
 ---
 
@@ -178,7 +200,10 @@ Auch Now-Playing-Seeking und die Headset-Tasten stoppen bzw. springen innerhalb 
 ios/                       Capacitor-iOS-Projekt (App.xcworkspace, Podfile, Info.plist, AppDelegate)
 plugins/beatclip-media/    lokales Capacitor-Plugin: Swift-Bruecke + BeatclipMedia.podspec
 tools/make_ios_assets.js   AppIcon + Splash fuer ios/App/App/Assets.xcassets
-tools/build_ios.sh         Build-Anleitung/Ablauf auf dem Mac (sim | device | ipa | testflight)
+tools/build_ios.sh         Build-Anleitung/Ablauf auf dem Mac (sim | device | ipa | testflight | clean)
+tools/ios_clean.sh         Xcode-Caches dieses Projekts löschen (IDE-„module dependency“-Fehler)
+tools/ios_fix.sh           ios_clean.sh + Assets/sync/pod install, oeffnet App.xcworkspace
+tools/ios_pods_dependency.js  haelt die Ziel-Abhaengigkeit App -> Pods-App im .xcodeproj aktuell
 dist/ios/                  Ziel fuer gebaute .ipa (hier nicht gebaut)
 ```
 Der Rest (Web-UI, Android-Projekt, Signing) steht in [README-ANDROID.md](README-ANDROID.md).
