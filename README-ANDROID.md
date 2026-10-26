@@ -127,6 +127,20 @@ Platz steht unter Einstellungen → „Speicher“.
 - Bibliothek → **Aufnahme** startet die Mikrofonaufnahme; **Aufnahme beenden** speichert sie automatisch in der lokalen Bibliothek. Android fragt nach Mikrofonzugriff.
 - Im Menü eines Titels **Stereo-Kanäle extrahieren** wählen, dort das Format (Chips **WAV / MP3 / M4A**) auswählen und bei der gewünschten Mono-Datei auf **Speichern** tippen. Android öffnet den Systemdialog zur Speicherortauswahl (standardmäßig Downloads); M4A wird dort nativ (MediaCodec/MediaMuxer) als AAC kodiert. Das Sheet zeigt währenddessen Fortschritt (Spinner, Phasentext, Balken) – **Sheet schließen bricht ab** und löscht die temporären Dateien. Bei Mehrkanal-Audio wird jeder Kanal exportiert; Mono-Dateien sind nicht teilbar.
 
+### Playlist exportieren / importieren
+- Playlist-Übersicht (oder Playlist-Ansicht) → ⋯ einer Playlist → **Exportieren**.
+  Modus über die Chips: **Nur Referenzen** (JSON mit Reihenfolge und
+  Schnittmarken, wenige KB – braucht die Titel auf dem Zielgerät) oder
+  **Vollständig** (ZIP mit `playlist.json` und `audio/…`; das Sheet zeigt die
+  geschätzte Größe). Android öffnet den Systemdialog zur Speicherortauswahl.
+- **Importieren** im selben Menü: ZIP- oder JSON-Datei über den
+  Systemspeicher-Dialog wählen. Es entsteht immer eine **neue** Playlist; die
+  Titel werden über Dateiname, Größe und Spieldauer mit der lokalen Bibliothek
+  verknüpft. Beim Voll-Export fehlen keine Titel – so lassen sich ganze
+  Playlists inklusive Schnitten auf ein anderes Gerät übertragen.
+- Der Dialog nutzt denselben nativen Kanal wie die Kanal-Exporte
+  (Chunk-für-Chunk-Übergabe, Fortschritt im Sheet, Abbruch beim Schließen).
+
 ### Schnitt (Start/Ende) unverändert
 Wie im Prototyp: Playlist → Titel → *Schnitt* → Griffe **S**/**E** auf der Waveform,
 bzw. Zeitwerte von Hand. Der Schnitt gilt pro Playlist-Eintrag, die Wiedergabe stoppt

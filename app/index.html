@@ -85,6 +85,11 @@
        Die Formate werden beim Import in app.js geprüft. -->
   <input type="file" id="filePick" multiple hidden>
 
+  <!-- Playlist-Import (.json = nur Reihenfolge/Schnitte, .zip = Voll-Export) -->
+  <!-- ebenfalls ohne accept: Android/WebView zeigt sonst manche Archive nicht an.
+       Die Pruefung von Dateiinhalt und Endung uebernimmt app.js. -->
+  <input type="file" id="plImportPick" multiple hidden>
+
   <!-- Wiedergabe-Engine (ein MediaElement = beste Bluetooth-/Sperrbildschirm-Routing-Kompatibilität) -->
   <audio id="audio" preload="auto"></audio>
 </div>

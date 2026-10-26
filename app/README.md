@@ -72,6 +72,23 @@ Die App benutzt ein einziges `<audio>`-Element → die Wiedergabe folgt der
 - **Aufnahme:** Bibliothek → „Aufnahme“ startet eine Mikrofonaufnahme. Beim Beenden wird sie automatisch als Audiodatei in der lokalen Bibliothek gespeichert.
 - **Kanäle exportieren:** Im Menü eines Titels „Kanäle extrahieren / exportieren“ wählen. Bei Stereo werden links und rechts als separate Mono-Dateien angeboten; auf Geräten mit mehr Kanälen wird jeder Kanal einzeln exportiert. Mono-Quellen lassen sich nicht aufteilen – sie werden als ein Track („Titel_Mono“) in WAV, MP3 oder M4A ausgegeben. Über die Chips **WAV / MP3 / M4A** unter dem Titel wird das Zielformat gewählt (MP3 mit 192 kbps, im Browser mit lamejs kodiert). „Speichern“ öffnet den Speicher-/Download-Dialog des Geräts. **M4A (AAC)** ist nur in der nativen BeatClip-App verfügbar – dort wandelt das Betriebssystem das Material im Native-Layer um. Während des Erzeugens zeigt das Sheet Spinner, Phasentext und Fortschrittsbalken (MP3 in Prozent, M4A mit „Rohdaten uebergeben…“ / „M4A wird kodiert…“); Speichern, Teilen und die Formatchips sind solange gesperrt. Sheet schließen bricht den Lauf ab und räumt die temporären Dateien der App auf.
 
+## Playlist-Import / -Export
+
+Im ⋯-Menü einer Playlist (in der Playlist-Übersicht oder in der Playlist-Ansicht): **Export** und **Import**.
+
+- **Nur Referenzen** (Standard): eine kleine JSON-Datei mit Titelreihenfolge, Schnitten,
+  Playlist-Name und Cover-Emoji. Sie setzt voraus, dass die Audiodateien auf dem Zielgerät
+  bereits importiert sind.
+- **Vollständig**: eine ZIP-Datei mit `playlist.json` und den Audiodateien unter `audio/`.
+  Das Sheet zeigt vorab die geschätzte Größe; Titel ohne Audiodatei im Speicher werden
+  übersprungen und gemeldet.
+- Der Import erkennt das Format automatisch (ZIP oder JSON) und legt **immer eine neue
+  Playlist** an (bei Namensdopplung „… (2)“). Titel werden über Dateiname, Dateigröße und
+  Spieldauer wiedergefunden; aus einem Voll-Export fehlen sie nie. Es wird nichts gelöscht
+  oder überschrieben – nur die neue Playlist kommt hinzu.
+- Schnittmarken werden beim Import auf die lokale Spieldauer begrenzt (Spannen unter 0,5 s
+  gelten als „kein Schnitt“).
+
 ## Formate
 
 MP3, M4A/AAC, OGG/Opus, WAV überall; FLAC je nach Browser/Gerät.

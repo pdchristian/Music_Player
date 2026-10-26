@@ -14,7 +14,7 @@
    (BeatClipMedia.appInfo) – die Konstanten dienen nur als Fallback (PWA, iOS ohne
    Plugin-Antwort) und sollten mit android/app/build.gradle bzw. ios/…/project.pbxproj
    mitlaufen. */
-let APP_VER = "1.2.5", APP_BUILD = 9;
+let APP_VER = "1.3.0", APP_BUILD = 10;
 
 /* ─────────────────────────── Utils ───────────────────────────────────── */
 const $  = s => document.querySelector(s);
@@ -106,6 +106,10 @@ const idbDel  = (store, key) => new Promise((res, rej) => {
 const idbAll  = store => new Promise((res, rej) => {
   const rq = idb.transaction(store, "readonly").objectStore(store).getAll();
   rq.onsuccess = () => res(rq.result || []); rq.onerror = () => rej(rq.error);
+});
+const idbGet  = (store, key) => new Promise((res, rej) => {
+  const rq = idb.transaction(store, "readonly").objectStore(store).get(key);
+  rq.onsuccess = () => res(rq.result || null); rq.onerror = () => rej(rq.error);
 });
 
 async function loadAll(){
@@ -265,6 +269,26 @@ async function cancelNativeEncode(id){
   try{ await NativeMedia.cancelAudioEncode({ id }); }
   catch(error){ console.warn("Temporary M4A-Datei konnte nicht entfernt werden:", error); }
 }
+/* Ein Titel in die Bibliothek uebernehmen: Peaks + Dauer ermitteln, Blob ablegen.
+   Nutzen der Datei-Import und der Playlist-Import (beim Voll-Export mit Audio). */
+async function addTrackFile(file){
+  const { artist, title } = parseName(file.name);
+  const id = uid();
+  let dur = 0, peaks = null;
+  try{
+    const ab = await file.arrayBuffer();
+    const info = await computePeaks(ab, 1000);
+    if (info){ dur = info.dur; peaks = info.peaks; }
+  }catch(e){ /* Datei trotzdem importieren: Dauer dann beim ersten Abspielen ermittelt */ }
+  if (!dur) dur = await probeDuration(file).catch(() => 0);
+  const rec = { id, title, artist, album:"", dur, fmt:(file.name.split(".").pop()||"?").toUpperCase(),
+    size:file.size, name:file.name, icon:iconFor(id), added:Date.now(), peaks:peaks || null,
+    lastPlay:0 };
+  await idbPut("blobs", { id, blob:file });
+  await idbPut("tracks", rec);
+  state.tracks.set(id, rec);
+  return rec;
+}
 async function importFiles(files){
   if (!state.db.ok){ toast(T("toast.storage_blocked"), true); return; }
   // Erst anhand der Endung prüfen, dann (nachrangig) an der MIME-Art –
@@ -278,24 +302,10 @@ async function importFiles(files){
   renderCurrent();
   try{
     for (const file of list){
-      const { artist, title } = parseName(file.name);
-      const id = uid();
-      let dur = 0, peaks = null;
-      try{
-        const ab = await file.arrayBuffer();
-        const info = await computePeaks(ab, 1000);
-        if (info){ dur = info.dur; peaks = info.peaks; }
-      }catch(e){ /* Datei trotzdem importieren: Dauer dann beim ersten Abspielen ermittelt */ }
-      if (!dur) dur = await probeDuration(file).catch(() => 0);
-      const track = { id, title, artist, album:"", dur, fmt:(file.name.split(".").pop()||"?").toUpperCase(),
-        size:file.size, name:file.name, icon:iconFor(id), added:Date.now(), peaks:peaks || null,
-        lastPlay:0 };
-      await idbPut("blobs", { id, blob:file });
-      await idbPut("tracks", track);
-      state.tracks.set(id, track);
+      const rec = await addTrackFile(file);
       /* automatisch in die erste Playlist */
       const pl = state.playlists[0];
-      pl.items.push({ id:uid(), trackId:id, cut:null });
+      pl.items.push({ id:uid(), trackId:rec.id, cut:null });
       await savePlaylist(pl);
       state.ui.importDone++;
       if (state.ui.importing) renderCurrent();
@@ -443,9 +453,11 @@ async function extractChannels(trackId){
   }
 }
 const EXPORT_FORMATS = {
-  wav:{ ext:"wav", label:"WAV",  mime:"audio/wav",  desc:"export.desc.wav" },
-  mp3:{ ext:"mp3", label:"MP3",  mime:"audio/mpeg", desc:"export.desc.mp3" },
-  m4a:{ ext:"m4a", label:"M4A",  mime:"audio/mp4",  desc:"export.desc.m4a" },
+  wav:{ ext:"wav", label:"WAV",  mime:"audio/wav",   desc:"export.desc.wav" },
+  mp3:{ ext:"mp3", label:"MP3",  mime:"audio/mpeg",  desc:"export.desc.mp3" },
+  m4a:{ ext:"m4a", label:"M4A",  mime:"audio/mp4",   desc:"export.desc.m4a" },
+  json:{ ext:"json", label:"JSON", mime:"application/json", desc:"export.desc.json" },
+  zip:{  ext:"zip",  label:"ZIP",  mime:"application/zip",  desc:"export.desc.zip"  },
 };
 function clearChannelExports(){
   exportJob++;                       // laufende Encodings verwerfen
@@ -462,11 +474,24 @@ function clearChannelExports(){
 }
 /* Fortschritt im Sheet anzeigen: Label + Balken, ratio null = unbestimmt.
    locked = true, waehrend der System-Speicherdialog laeuft (nicht abbrechbar). */
+let activeSheet = null;   // "channel" | "pl" – Blatt, das den Export-Fortschritt anzeigt
 function exportStatus(label, ratio, locked){
   const pct = ratio == null ? null : clamp(Math.round(ratio*100), 0, 100);
   const prev = state.ui.exportBusy;
   state.ui.exportBusy = label ? { label, pct, locked:!!locked } : null;
-  if (!label || !prev || prev.label !== label || prev.pct !== pct || prev.locked !== !!locked) renderChannelExportSheet();
+  if (!label || !prev || prev.label !== label || prev.pct !== pct || prev.locked !== !!locked) renderActiveSheet();
+}
+function renderActiveSheet(){ (activeSheet === "pl" ? renderPlExportSheet : renderChannelExportSheet)(); }
+/* Fortschrittsblock, den beide Export-Sheets (Kanale + Playlist) nutzen. */
+function exportStatusHtml(){
+  const busy = state.ui.exportBusy;
+  if (!busy) return "";
+  return '<div class="exportStatus"><div class="rowTitle"><span class="spin"></span> ' + esc(busy.label) +
+    (busy.pct == null ? '' : ' ' + busy.pct + '%') + '</div>' +
+    (busy.pct == null ? '<div class="progress indet"><i></i></div>'
+                      : '<div class="progress"><i style="width:' + busy.pct + '%"></i></div>') +
+    (busy.locked ? '' : '<div class="exportHint">' + T("export.hint") + '</div>') +
+    '</div>';
 }
 function openChannelExportSheet(t){
   channelExportTrack = t;
@@ -476,6 +501,7 @@ function openChannelExportSheet(t){
 function renderChannelExportSheet(){
   const d = channelExportData, t = channelExportTrack;
   if (!d || !t) return;
+  activeSheet = "channel";
   const busy = state.ui.exportBusy;
   const m4aOn = nativeM4aAvailable();
   const chips = ["wav", "mp3", "m4a"].map(f => {
@@ -493,14 +519,7 @@ function renderChannelExportSheet(){
       '<button class="btn small" data-act="share-channel" data-index="' + index + '"' + dis + '>' + T("button.share") + '</button></div>';
   }).join("");
   // Rueckmeldung, solange kodiert/uebertragen wird (dauert bei langen Titeln).
-  const status = busy
-    ? '<div class="exportStatus"><div class="rowTitle"><span class="spin"></span> ' + esc(busy.label) +
-      (busy.pct == null ? '' : ' ' + busy.pct + '%') + '</div>' +
-      (busy.pct == null ? '<div class="progress indet"><i></i></div>'
-                        : '<div class="progress"><i style="width:' + busy.pct + '%"></i></div>') +
-      (busy.locked ? '' : '<div class="exportHint">' + T("export.hint") + '</div>') +
-      '</div>'
-    : "";
+  const status = exportStatusHtml();
   openSheet('<div class="grab"></div><h2>' + T("extract.sheet_title") + '</h2>' +
     '<div class="sub">' + esc(t.title) + ' · ' + (d.names.length === 1 ? T("extract.sub_one") : T("extract.sub_multi", { n:d.names.length })) + '</div>' +
     '<div class="chipRow' + (busy ? ' chipBusy' : '') + '">' + chips + '</div>' +
@@ -620,6 +639,393 @@ async function saveChannelExport(index){
     if (exportAlive(job)) exportStatus(null);
   }
 }
+/* ═══════════════════════════ PLAYLIST-EXPORT / -IMPORT ═════════════════════
+   Zwei Export-Varianten:
+     refs : Titelreihenfolge + Schnittmarken (plus Titel-Metadaten) als JSON
+     full : dasselbe JSON plus alle Audiodateien in einem ZIP-Archiv
+   Das ZIP wird in 256-KB-Bloecken geschrieben (Verfahren "Store", ohne Kompression),
+   damit grosse Playlists nicht komplett in den Speicher muessen – bei MP3/M4A bringt
+   Kompression ohnehin fast nichts. Beim Import zaehlt die Dateiversion nicht die
+   internen Titel-IDs (geraete-lokal), sondern Dateiname + Groesse + Dauer.
+   ═══════════════════════════════════════════════════════════════════════════ */
+const PL_EXPORT_MAGIC = "beatclip-playlist", PL_EXPORT_VERSION = 1;
+let plExport = { plId:null, mode:"refs" };
+const round3 = v => Math.round((Number(v) || 0) * 1000) / 1000;
+
+/* ── minimales ZIP (nur Verfahren "Store") ── */
+const ZIP_CHUNK = 256 * 1024;
+const CRC_TABLE = (() => {
+  const table = new Uint32Array(256);
+  for (let n = 0; n < 256; n++){
+    let c = n;
+    for (let k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+    table[n] = c >>> 0;
+  }
+  return table;
+})();
+function crcFeed(reg, bytes){
+  let c = reg;
+  for (let i = 0; i < bytes.length; i++) c = CRC_TABLE[(c ^ bytes[i]) & 0xFF] ^ (c >>> 8);
+  return c >>> 0;
+}
+const crcFinish = reg => (reg ^ 0xFFFFFFFF) >>> 0;
+function dosStamp(d){
+  return {
+    time: ((d.getHours() << 11) | (d.getMinutes() << 5) | Math.floor(d.getSeconds() / 2)) & 0xFFFF,
+    date: (((d.getFullYear() - 1980) << 9) | ((d.getMonth() + 1) << 5) | d.getDate()) & 0xFFFF,
+  };
+}
+async function blobEach(blob, fn){
+  for (let p = 0; p < blob.size; p += ZIP_CHUNK)
+    await fn(new Uint8Array(await blob.slice(p, Math.min(p + ZIP_CHUNK, blob.size)).arrayBuffer()));
+}
+/* entries: [{ name, blob }] – schreibt lokales Headerfeld, Daten, Zentralverzeichnis
+   und EOCD; progress(byteSoll) nach jedem Block (wirft zum Abbrechen). */
+async function zipWrite(sink, entries, progress){
+  const enc = new TextEncoder();
+  const stamp = dosStamp(new Date());
+  const central = [];
+  let offset = 0, done = 0;
+  for (const e of entries){
+    const nameBytes = enc.encode(e.name);
+    let reg = 0xFFFFFFFF;
+    await blobEach(e.blob, bytes => { reg = crcFeed(reg, bytes); });
+    const crc = crcFinish(reg);
+    const local = offset;
+    const head = new Uint8Array(30 + nameBytes.length);
+    const hv = new DataView(head.buffer);
+    hv.setUint32(0, 0x04034b50, true);
+    hv.setUint16(4, 20, true);
+    hv.setUint16(6, 0x0800, true);              // UTF-8-Namen
+    hv.setUint16(8, 0, true);                   // Store (keine Kompression)
+    hv.setUint16(10, stamp.time, true);
+    hv.setUint16(12, stamp.date, true);
+    hv.setUint32(14, crc, true);
+    hv.setUint32(18, e.blob.size, true);
+    hv.setUint32(22, e.blob.size, true);
+    hv.setUint16(26, nameBytes.length, true);
+    head.set(nameBytes, 30);
+    await sink.write(head); offset += head.length;
+    await blobEach(e.blob, async bytes => {
+      await sink.write(bytes);
+      offset += bytes.length; done += bytes.length;
+      if (progress) progress(done);
+    });
+    central.push({ nameBytes, crc, size: e.blob.size, local });
+  }
+  const cdStart = offset;
+  for (const c of central){
+    const rec = new Uint8Array(46 + c.nameBytes.length);
+    const v = new DataView(rec.buffer);
+    v.setUint32(0, 0x02014b50, true);
+    v.setUint16(4, 20, true); v.setUint16(6, 20, true);
+    v.setUint16(8, 0x0800, true); v.setUint16(10, 0, true);
+    v.setUint16(12, stamp.time, true); v.setUint16(14, stamp.date, true);
+    v.setUint32(16, c.crc, true); v.setUint32(20, c.size, true); v.setUint32(24, c.size, true);
+    v.setUint16(28, c.nameBytes.length, true);
+    v.setUint32(42, c.local, true);
+    rec.set(c.nameBytes, 46);
+    await sink.write(rec); offset += rec.length;
+  }
+  const eocd = new Uint8Array(22);
+  const ev = new DataView(eocd.buffer);
+  ev.setUint32(0, 0x06054b50, true);
+  ev.setUint16(8, central.length, true);
+  ev.setUint16(10, central.length, true);
+  ev.setUint32(12, offset - cdStart, true);
+  ev.setUint32(16, cdStart, true);
+  await sink.write(eocd);
+}
+/* Liest das Zentralverzeichnis eines ZIP – nur Verfahren "Store" (eigene Exporte). */
+async function zipOpen(file){
+  if (file.size < 22) throw new Error(T("pl.import_err_zip"));
+  const tailLen = Math.min(file.size, 66000);
+  const tail = new Uint8Array(await file.slice(file.size - tailLen).arrayBuffer());
+  const tv = new DataView(tail.buffer);
+  let eocd = -1;
+  for (let i = tail.length - 22; i >= 0; i--) if (tv.getUint32(i, true) === 0x06054b50){ eocd = i; break; }
+  if (eocd < 0) throw new Error(T("pl.import_err_zip"));
+  const count = tv.getUint16(eocd + 10, true);
+  const cd = new Uint8Array(await file.slice(tv.getUint32(eocd + 16, true),
+    tv.getUint32(eocd + 16, true) + tv.getUint32(eocd + 12, true)).arrayBuffer());
+  const cv = new DataView(cd.buffer), dec = new TextDecoder();
+  const entries = [];
+  let p = 0;
+  for (let i = 0; i < count && p + 46 <= cd.length; i++){
+    if (cv.getUint32(p, true) !== 0x02014b50) break;
+    const nameLen = cv.getUint16(p + 28, true);
+    entries.push({
+      name: dec.decode(cd.subarray(p + 46, p + 46 + nameLen)),
+      method: cv.getUint16(p + 10, true),
+      size: cv.getUint32(p + 20, true),
+      local: cv.getUint32(p + 42, true),
+    });
+    p += 46 + nameLen + cv.getUint16(p + 30, true) + cv.getUint16(p + 32, true);
+  }
+  return { entries,
+    async blob(e){
+      if (e.method !== 0) throw new Error(T("pl.import_err_zip"));
+      const lh = new Uint8Array(await file.slice(e.local, e.local + 30).arrayBuffer());
+      const lv = new DataView(lh.buffer);
+      const start = e.local + 30 + lv.getUint16(26, true) + lv.getUint16(28, true);
+      return file.slice(start, start + e.size);
+    } };
+}
+
+/* Datei auf dem Geraet ablegen: native Bruecke -> Speicherdialog -> Download.
+   Liefert { write(bytes), finish(), abort() } – write() wird blockweise aufgerufen. */
+async function openFileSink(name, fmt, report){
+  const meta = EXPORT_FORMATS[fmt];
+  const tell = report || (() => {});
+  if (NATIVE && NativeMedia?.beginAudioExport && NativeMedia?.writeAudioExportChunk && NativeMedia?.saveAudioExport){
+    const started = await NativeMedia.beginAudioExport({ name });
+    let id = started.id, offset = 0;
+    return {
+      async write(bytes){
+        await NativeMedia.writeAudioExportChunk({ id, offset, data: toBase64(bytes) });
+        offset += bytes.length;
+      },
+      async finish(){
+        tell(T("export.dialog_open"), null, true);
+        await NativeMedia.saveAudioExport({ id, name, mime: meta.mime });
+        id = null;
+      },
+      async abort(){
+        if (id == null || !NativeMedia.cancelAudioExport) return;
+        try{ await NativeMedia.cancelAudioExport({ id }); }
+        catch(cleanupError){ console.error("Temporäre Exportdatei konnte nicht entfernt werden:", cleanupError); }
+        id = null;
+      }
+    };
+  }
+  if (window.showSaveFilePicker){
+    tell(T("export.dialog_open"), null, true);
+    const handle = await window.showSaveFilePicker({
+      suggestedName: name,
+      types:[{ description: T(meta.desc), accept:{ [meta.mime]: ["." + meta.ext] } }],
+    });
+    const writable = await handle.createWritable();
+    let closed = false;
+    return {
+      async write(bytes){ await writable.write(bytes); },
+      async finish(){ closed = true; tell(T("export.writing"), null, true); await writable.close(); },
+      async abort(){ if (closed) return; closed = true; try{ await writable.close(); }catch(c){ /* schon geschlossen */ } }
+    };
+  }
+  const parts = [];
+  return {
+    async write(bytes){ parts.push(bytes); },
+    async finish(){
+      const url = URL.createObjectURL(new File(parts, name, { type: meta.mime }));
+      const link = document.createElement("a");
+      link.href = url; link.download = name;
+      document.body.appendChild(link); link.click(); link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 30000);
+    },
+    async abort(){ parts.length = 0; }
+  };
+}
+
+/* Export-Modell: eindeutige "ref" pro Titel – ein Titel, der mehrfach in der
+   Playlist steht, liegt in der Dateiablage nur einmal. trackId nur intern. */
+function playlistExportModel(pl){
+  const refs = new Map(), tracks = [], items = [];
+  pl.items.forEach(it => {
+    const t = track(it.trackId); if (!t) return;
+    let ref = refs.get(t.id);
+    if (!ref){
+      ref = "t" + (tracks.length + 1);
+      refs.set(t.id, ref);
+      tracks.push({ ref, trackId:t.id,
+        file: t.name || (t.title + "." + String(t.fmt || "bin").toLowerCase()),
+        title:t.title, artist:t.artist, dur:round3(t.dur), size:t.size || 0, fmt:t.fmt || "" });
+    }
+    items.push({ ref, cut: it.cut ? { start:round3(it.cut.start), end:round3(it.cut.end) } : null });
+  });
+  return { tracks, items };
+}
+function playlistExportDoc(pl, mode, model){
+  return {
+    format: PL_EXPORT_MAGIC, version: PL_EXPORT_VERSION, mode,
+    exported: new Date().toISOString(),
+    app:{ name:"BeatClip", version:APP_VER, build:APP_BUILD },
+    playlist:{ name:pl.name, cover:pl.cover || "🎧" },
+    tracks: model.tracks.map(({ trackId, ...rest }) => rest),
+    items: model.items,
+  };
+}
+function openPlExportSheet(plId){ plExport.plId = plId; renderPlExportSheet(); }
+function renderPlExportSheet(){
+  const pl = playlist(plExport.plId);
+  if (!pl) return;
+  activeSheet = "pl";
+  const busy = state.ui.exportBusy;
+  const model = playlistExportModel(pl);
+  const cuts = model.items.filter(i => i.cut).length;
+  const bytes = model.tracks.reduce((a, t) => a + (t.size || 0), 0);
+  const chips = ["refs", "full"].map(m =>
+    '<span class="chip' + (plExport.mode === m ? " on" : "") + '" data-act="pl-export-mode" data-m="' + m +
+    '">' + T("pl.export_mode_" + m) + '</span>').join("");
+  openSheet('<div class="grab"></div><h2>' + T("pl.export_title") + '</h2>' +
+    '<div class="sub">' + esc(pl.name) + " · " + T("pl.export_sub", { n:model.items.length, cuts }) + '</div>' +
+    '<div class="chipRow' + (busy ? " chipBusy" : "") + '">' + chips + '</div>' +
+    '<div class="infoBlock">' + T(plExport.mode === "full" ? "pl.export_full_hint" : "pl.export_refs_hint") +
+      (plExport.mode === "full" ? '<div class="mono" style="margin-top:6px">' +
+        T("pl.export_size", { n:model.tracks.length, size:fmtBytes(bytes) }) + '</div>' : "") +
+    '</div>' +
+    exportStatusHtml() +
+    '<div class="sheetbtns"><button class="btn" data-act="sheet-close"' + (busy && busy.locked ? " disabled" : "") +
+      '>' + T("button.close") + '</button>' +
+    '<button class="btn primary" data-act="pl-export-run"' + (busy ? " disabled" : "") +
+      '>⬇ ' + T("pl.export") + '</button></div>', true);
+}
+async function runPlaylistExport(){
+  if (state.ui.exportBusy) return;
+  const pl = playlist(plExport.plId); if (!pl) return;
+  const model = playlistExportModel(pl);
+  if (!model.tracks.length){ toast(T("toast.playlist_empty_named", { name:pl.name }), true); return; }
+  const job = exportJob;
+  const full = plExport.mode === "full";
+  const jsonText = JSON.stringify(playlistExportDoc(pl, full ? "full" : "refs", model), null, 2);
+  const name = safeFileBase(pl.name) + (full ? "-playlist-full.zip" : "-playlist.json");
+  let sink = null, skipped = 0;
+  try{
+    if (!full){
+      exportStatus(T("export.json"), 0.2);
+      sink = await openFileSink(name, "json", (l, r, k) => exportStatus(l, r, k));
+      await sink.write(new TextEncoder().encode(jsonText));
+      await sink.finish();
+    } else {
+      const jsonBlob = new Blob([jsonText], { type:"application/json" });
+      const entries = [{ name:"playlist.json", blob:jsonBlob }];
+      for (const t of model.tracks){
+        const rec = await idbGet("blobs", t.trackId);
+        if (rec?.blob) entries.push({ name:"audio/" + t.ref + "." + (String(t.fmt || "").toLowerCase() || "bin"), blob:rec.blob });
+        else skipped++;
+      }
+      const total = entries.reduce((a, e) => a + e.blob.size, 0) || 1;
+      exportStatus(T("export.zip"), null);
+      sink = await openFileSink(name, "zip", (l, r, k) => exportStatus(l, r, k));
+      await zipWrite(sink, entries, done => {
+        if (!exportAlive(job)) throw EXPORT_ABORT;
+        exportStatus(T("export.zip"), clamp(done / total, 0, 0.99));
+      });
+      await sink.finish();
+    }
+    toast(skipped ? T("toast.playlist_exported_partial", { name, n:skipped })
+                  : T("toast.playlist_exported", { name }), !!skipped);
+  }catch(error){
+    if (sink) await sink.abort();
+    if (error === EXPORT_ABORT){ toast(T("toast.export_aborted")); return; }
+    if (error?.code !== "USER_CANCELLED" && error?.name !== "AbortError"){
+      console.error("Playlist-Export fehlgeschlagen:", error);
+      toast(T("export.save_failed") + " " + (error?.message || T("error.unknown")), true);
+    }
+  }finally{
+    if (exportAlive(job)) exportStatus(null);
+  }
+}
+
+/* Geschnittene Spanne importieren: an die Titel-Laenge anpassen, Quatsch verwerfen. */
+function clipCut(c, dur){
+  if (!c) return null;
+  let s = Number(c.start), e = Number(c.end);
+  if (!isFinite(s) || !isFinite(e) || s < 0 || e <= s) return null;
+  if (isFinite(dur) && dur > 0){ s = Math.min(s, dur); e = Math.min(e, dur); }
+  if (e - s < 0.5) return null;
+  return { start:round3(s), end:round3(e) };
+}
+/* Importierten Titel in der lokalen Bibliothek wiederfinden: zuerst exakt ueber
+   Dateiname + Groesse + Dauer, dann ueber den Dateinamen, zuletzt Titel/Interpret. */
+function findTrackByMeta(d){
+  const all = Array.from(state.tracks.values());
+  const name = String(d.file || "").toLowerCase();
+  if (name){
+    const exact = all.find(t => String(t.name || "").toLowerCase() === name &&
+      (!d.size || Math.abs((t.size || 0) - d.size) <= 4) &&
+      (!d.dur || Math.abs((t.dur || 0) - d.dur) <= 1.5));
+    if (exact) return exact;
+    const byName = all.find(t => String(t.name || "").toLowerCase() === name);
+    if (byName) return byName;
+  }
+  return all.find(t => t.title && t.title === d.title && (!d.artist || t.artist === d.artist) &&
+    (!d.dur || Math.abs((t.dur || 0) - d.dur) <= 1.5)) || null;
+}
+function playlistNameFree(base){
+  const clean = String(base || "").trim() || T("pl.import_default_name");
+  let name = clean, i = 2;
+  while (state.playlists.some(p => p.name.toLowerCase() === name.toLowerCase())) name = clean + " (" + (i++) + ")";
+  return name;
+}
+async function importPlaylistFiles(files){
+  if (!state.db.ok){ toast(T("toast.storage_blocked"), true); return; }
+  for (const file of Array.from(files)){
+    try{ await importPlaylistFile(file); }
+    catch(error){
+      console.error("Playlist-Import fehlgeschlagen:", error);
+      toast(T("pl.import_failed") + " " + (error?.message || T("error.unknown")), true);
+    }
+  }
+}
+/* Eine Playlist-Datei importieren (.json = Referenzen, .zip = Voll-Export). */
+async function importPlaylistFile(file){
+  let doc = null, zip = null;
+  const magic = new Uint8Array(await file.slice(0, 4).arrayBuffer());
+  if (magic[0] === 0x50 && magic[1] === 0x4b && magic[2] === 0x03 && magic[3] === 0x04){
+    zip = await zipOpen(file);
+    const meta = zip.entries.filter(e => /\.json$/i.test(e.name)).sort((a, b) => a.name.length - b.name.length)[0];
+    if (!meta) throw new Error(T("pl.import_err_no_json"));
+    doc = JSON.parse(await (await zip.blob(meta)).text());
+  } else {
+    doc = JSON.parse(await file.text());
+  }
+  if (!doc || doc.format !== PL_EXPORT_MAGIC || !Array.isArray(doc.items))
+    throw new Error(T("pl.import_err_format"));
+  if (Number(doc.version) > PL_EXPORT_VERSION) throw new Error(T("pl.import_err_version"));
+
+  const described = new Map((doc.tracks || []).map(t => [t.ref, t]));
+  const audio = zip ? zip.entries.filter(e => e.name.startsWith("audio/")) : [];
+  const resolved = new Map();
+  let linked = 0, added = 0, missing = 0;
+  state.ui.importing = true; state.ui.importTotal = described.size; state.ui.importDone = 0;
+  try{
+    for (const [ref, d] of described){
+      const found = findTrackByMeta(d);
+      if (found){ resolved.set(ref, found.id); linked++; }
+      else {
+        const entry = audio.find(e => e.name.startsWith("audio/" + ref + "."));
+        if (entry){
+          const fname = d.file || (ref + "." + (String(d.fmt || "").toLowerCase() || "bin"));
+          const rec = await addTrackFile(new File([await zip.blob(entry)], fname, { type: mimeFor(fname) }));
+          resolved.set(ref, rec.id); added++;
+        } else { resolved.set(ref, null); missing++; }
+      }
+      state.ui.importDone++;
+      if (state.ui.importing) renderCurrent();
+    }
+  } finally { state.ui.importing = false; }
+
+  const pl = { id:uid(), name:playlistNameFree(doc.playlist && doc.playlist.name),
+    cover:(doc.playlist && doc.playlist.cover) || "🎧", order:state.playlists.length, items:[] };
+  doc.items.forEach(it => {
+    const id = resolved.get(it.ref); if (!id) return;
+    const t = track(id);
+    pl.items.push({ id:uid(), trackId:id, cut: clipCut(it.cut, t ? t.dur : 0) });
+  });
+  if (!pl.items.length){
+    toast(missing ? T("toast.playlist_import_missing", { n:missing }) : T("pl.import_err_format"), true);
+    refreshCurrent();
+    return;
+  }
+  state.playlists.push(pl);
+  await savePlaylist(pl);
+  closeSheet();
+  state.ui.activePl = pl.id;
+  go("pl");
+  if (missing) toast(T("toast.playlist_imported_missing", { name:pl.name, n:pl.items.length, m:missing }));
+  else toast(T("toast.playlist_imported", { name:pl.name, n:pl.items.length, linked, added }));
+}
+
 /* Demo-Titel (synthetische WAVs), falls keine echten Dateien griffbereit */
 async function importDemoTracks(){
   if (!state.db.ok){ toast(T("toast.storage_short"), true); return; }
@@ -1154,6 +1560,7 @@ function openSheet(html, keepChannelExports){ if (!keepChannelExports) clearChan
   $("#sheet").innerHTML = html; $("#sheet").classList.add("open");
   $("#overlay").classList.add("open"); }
 function closeSheet(){ $("#sheet").classList.remove("open"); $("#overlay").classList.remove("open");
+  activeSheet = null;
   state.ui.editTrack = null; clearChannelExports(); }
 $("#overlay").addEventListener("click", closeSheet);
 
@@ -1227,7 +1634,8 @@ function renderPlaylists(){
       '<div class="rowInfo"><div class="rowTitle">' + esc(pl.name) + '</div>' +
       '<div class="rowSub">' + T("playlists.row_sub", { n:pl.items.length, time:mmss(total), cuts }) + '</div></div>' +
       '<div class="rowRight">' +
-      '<button class="iconBtn" data-act="play-pl" data-pl="' + pl.id + '" title="' + T("button.play_playlist") + '">▶</button><span>›</span>' +
+      '<button class="iconBtn" data-act="play-pl" data-pl="' + pl.id + '" title="' + T("button.play_playlist") + '">▶</button>' +
+      '<button class="iconBtn" data-act="pl-menu" data-pl="' + pl.id + '" title="' + T("button.more") + '">⋯</button><span>›</span>' +
       '</div></div>';
   });
   html += '</div></div>';
@@ -1873,6 +2281,8 @@ function openPlMenu(plId){
   const pl = playlist(plId);
   openSheet('<div class="grab"></div><h2>' + esc(pl.name) + '</h2>' +
     '<div class="menuitem" data-act="pl-rename" data-pl="' + plId + '">✏️ ' + T("pl.rename") + '</div>' +
+    '<div class="menuitem" data-act="pl-export" data-pl="' + plId + '">⬇ ' + T("pl.export") + '</div>' +
+    '<div class="menuitem" data-act="pl-import">⬆ ' + T("pl.import") + '</div>' +
     '<div class="menuitem dngr" data-act="pl-delete" data-pl="' + plId + '">🗑 ' + T("pl.delete") + '</div>' +
     '<div class="sheetbtns"><button class="btn" data-act="sheet-close">' + T("button.close") + '</button></div>');
 }
@@ -1922,6 +2332,12 @@ async function handle(act, el){
     case "open-pl": state.ui.activePl = ds.pl; go("pl"); break;
     case "pl-sort": state.ui.plSort = ds.s; renderPlDetail(); break;
     case "pl-menu": openPlMenu(ds.pl); break;
+    case "pl-export": if (state.ui.exportBusy) break; openPlExportSheet(ds.pl); break;
+    case "pl-export-mode": {
+      if (state.ui.exportBusy || (ds.m !== "refs" && ds.m !== "full")) break;
+      plExport.mode = ds.m; renderPlExportSheet(); break; }
+    case "pl-export-run": await runPlaylistExport(); break;
+    case "pl-import": $("#plImportPick").click(); break;
     case "pl-rename": { const pl = playlist(ds.pl);
       const n = prompt(T("pl.rename_prompt"), pl.name);
       if (n && n.trim()){ pl.name = n.trim(); await savePlaylist(pl); toast(T("toast.renamed")); refreshCurrent(); }
@@ -2141,6 +2557,10 @@ document.addEventListener("click", e => {
 });
 $("#filePick").addEventListener("change", e => {
   if (e.target.files && e.target.files.length) importFiles(e.target.files);
+  e.target.value = "";
+});
+$("#plImportPick").addEventListener("change", e => {
+  if (e.target.files && e.target.files.length) importPlaylistFiles(e.target.files);
   e.target.value = "";
 });
 window.addEventListener("dragover", e => e.preventDefault());
