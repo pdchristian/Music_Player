@@ -72,7 +72,7 @@ Mac-App **Transporter** zum Hochladen verwenden.
 
 **Version/Build** kommen aus `ios/App/App.xcodeproj` (`MARKETING_VERSION`,
 `CURRENT_PROJECT_VERSION`) und halten zu `app/app.js` (`APP_VER`/`APP_BUILD`) und
-`android/app/build.gradle` (aktuell **1.3.0**, Build **10**). App Store Connect weist einen
+`android/app/build.gradle` (aktuell **1.3.1**, Build **11**). App Store Connect weist einen
 Upload ab, wenn die Build-Nummer innerhalb derselben Version schon vergeben ist – dann
 `CURRENT_PROJECT_VERSION` erhöhen und neu archivieren. Beim ersten Upload fragt
 App Store Connect nach der **Export Compliance**; die App nutzt nur Standard-TLS, die
@@ -150,6 +150,28 @@ Alle Dateien liegen lokal im App-Sandbox (IndexedDB); keine Uploads, kein Konto.
 Wie gehabt: Playlist → Titel → *Schnitt* → Griffe **S**/**E** auf der Waveform.
 Auch Now-Playing-Seeking und die Headset-Tasten stoppen bzw. springen innerhalb des Schnitts.
 
+### Lautstärke und Blendzeit („Ausblenden an Schnittkante“)
+- **iOS ignoriert `audio.volume`** – Apple: „The volume property is not settable in
+  JavaScript. Reading the volume property always returns 1.“ Deshalb wirkten auf iOS
+  weder der Lautstärke-Regler noch die Blendung (Android hält sich daran, dort funktionierte
+  alles).
+- Deshalb hängt [`app/app.js`](app/app.js) (Abschnitt **„Gain-Pfad“**) das `audio`-Element
+  auf iOS **einmal pro App-Lauf** über `createMediaElementSource` an einen **GainNode**
+  (Web Audio) und legt dort Grundlautstärke *und* Blendung an. Auf Android und in der PWA
+  bleibt es beim bisherigen `audio.volume`.
+- Der AudioContext braucht eine erste Berührung: beim App-Start genügt das Antippen von
+  *Abspielen*; zusätzlich fängt `armWaGesture()` jede Berührung ab und holt einen von iOS
+  abgewählten Kontext zurück (`resumeWa()` aus `loop()`/`timeupdate`).
+- Die Rampe wird gleichzeitig von Intervall, `requestAnimationFrame` **und** dem
+  `timeupdate`-Ereignis getaktet – im Hintergrund drosselt iOS Intervalle auf ~1 s und rAF
+  ruht ganz, `timeupdate` läuft aber weiter. Das verbessert auch die Blendung auf Android.
+- **Blendzeit maximal 10 s** (Vorher: 4 s). Wie bisher gilt zusätzlich die halbe
+  Schnittlänge als Obergrenze, damit sich Fade-In und Fade-Out nie überlappen; in 0,5-s-
+  Schritten bis 4 s, darüber in ganzen Sekunden.
+- Abschaltbar in den **Einstellungen → „Lautstärke über Web Audio (iOS)“** (Standard: Ein).
+  Wegschalten wirkt erst nach einem **Neustart** der App, weil sich die Anbindung des
+  Media-Elements an Web Audio nicht rückgängig machen lässt.
+
 ---
 
 ## 4. Bekannte Grenzen / Hinweise
@@ -166,6 +188,13 @@ Auch Now-Playing-Seeking und die Headset-Tasten stoppen bzw. springen innerhalb 
 - Push-Benachrichtigungen braucht BeatClip nicht; die Medienleiste ist davon unabhängig.
 
 ### Fehlerbehebung
+- **Lautstärke-Regler ohne Effekt / Blendung („Ausblenden an Schnittkante“) bleibt hart**:
+  iOS ignoriert `audio.volume`, geholfen wird über den Web-Audio-Gain-Pfad
+  (Abschnitt *Lautstärke und Blendzeit* oben). Prüfen: Einstellungen → „Lautstärke über
+  Web Audio (iOS)“ steht auf **Ein**, und die App wurde nach dem Umschalten **neu
+  gestartet**. Spielt die App bei gesperrtem Bildschirm gar nicht oder bricht sie dort hart
+  ab (iOS hat das Web-Audio-Rendering abgewählt), den Schalter auf **Aus** stellen und die
+  App neu starten – dann läuft wieder der reine `audio`-Pfad (ohne Blendung).
 - **„Unable to resolve module dependency: 'Capacitor' / 'BeatclipMedia'“** in
   `AppDelegate.swift` (Build schlägt fehl, `xcodebuild` läuft aber durch): das Projekt hatte
   keine Ziel-Abhängigkeit auf `Pods-App`, deshalb wurden die Pods nur über das Workspace gebaut.

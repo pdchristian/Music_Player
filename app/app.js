@@ -14,7 +14,7 @@
    (BeatClipMedia.appInfo) – die Konstanten dienen nur als Fallback (PWA, iOS ohne
    Plugin-Antwort) und sollten mit android/app/build.gradle bzw. ios/…/project.pbxproj
    mitlaufen. */
-let APP_VER = "1.3.0", APP_BUILD = 10;
+let APP_VER = "1.3.1", APP_BUILD = 11;
 
 /* ─────────────────────────── Utils ───────────────────────────────────── */
 const $  = s => document.querySelector(s);
@@ -52,7 +52,7 @@ const state = {
   queue:[], qIndex:-1,
   player:{ trackId:null, playing:false },
   settings:{ theme:"dark", repeat:"all", shuffle:false, fade:1.0, gapless:true,
-             volume:0.9, sleepMin:0, plFirstRun:true, language:"" },
+             volume:0.9, sleepMin:0, plFirstRun:true, language:"", waGain:true },
   bt:{ active:false, label:"" },   // label setzt refreshBtInfo() übersetzt
 };
 
@@ -121,6 +121,7 @@ async function loadAll(){
     tracks.forEach(t => state.tracks.set(t.id, t));
     state.playlists = playlists.sort((a,b) => (a.order||0)-(b.order||0));
     settings.forEach(s => { if (s.key === "settings") Object.assign(state.settings, s.value); });
+    state.settings.fade = clamp(+state.settings.fade || 0, 0, FADE_MAX);
     if (!state.playlists.length){
       const pl = { id:uid(), name:T("playlist.default_name"), cover:"🎶", order:0, items:[] };
       await idbPut("playlists", pl); state.playlists.push(pl);
@@ -1094,6 +1095,7 @@ async function playQueue(plId, itemLocalId){
   await playItem(state.queue[idx < 0 ? 0 : idx], plId);
 }
 async function playItem(qItem, plId){
+  ensureWaRoute();   // iOS: Gain-Pfad spaetestens hier (nutzt die Antipp-Geste)
   const pl = playlist(plId) || state.playlists.find(p => p.items.some(i => i.id === qItem));
   if (!pl) return;
   const it = pl.items.find(i => i.id === qItem);
@@ -1122,10 +1124,10 @@ async function playItem(qItem, plId){
   }
   try{ audio.currentTime = clamp(from, 0, audio.duration); }catch(e){}
   cutEndGuard = false; // manueller Trackwechsel waehrend eines laufenden Uebergangs
-  if (state.settings.fade > 0) audio.volume = 0; // Fade-In beginnt bei 0, kein Klick an der Kante
+  setRamp(state.settings.fade > 0 ? 0 : 1); // Fade-In beginnt bei 0, kein Klick an der Kante
   try{ await audio.play(); }
   catch(e){ // Autoplay-Sperre o. A.: nicht mit stummer Wiedergabe/0 % Volume enden
-    state.player.playing = false; audio.volume = state.settings.volume;
+    state.player.playing = false; stopFadeIn(); stopFadeOut(true);
     renderMini(); refreshCurrent(); return;
   }
   state.player.playing = true;
@@ -1133,12 +1135,12 @@ async function playItem(qItem, plId){
     t.dur = audio.duration; idbPut("tracks", t);
   }
   t.lastPlay = Date.now(); idbPut("tracks", t);
-  stopFadeOut(false); clearTimeout(fadeWatchdog); // laufenden Fade-Out nicht auf den neuen Track weiterlaufen lassen
+  stopFadeOut(false); stopFadeIn(); clearTimeout(fadeWatchdog); // laufenden Fade-Out nicht auf den neuen Track weiterlaufen lassen
   armEndWatchdog();
   setupIOSAudioSession();
   updateMediaSession();
   nativeStartSession();
-  if (state.settings.fade > 0) fadeIn();
+  if (state.settings.fade > 0) fadeIn(); else refreshMaster();
   renderMini(); refreshCurrent();
 }
 function armEndWatchdog(){
@@ -1153,7 +1155,7 @@ function armEndWatchdog(){
   }, ahead*1000);
 }
 function stopPlayback(){
-  stopFadeOut(true); clearTimeout(fadeWatchdog); cutEndGuard = false;
+  stopFadeOut(true); stopFadeIn(); clearTimeout(fadeWatchdog); cutEndGuard = false;
   audio.pause(); state.player.playing = false;
   nativeStopSession(); renderMini(); refreshCurrent();
 }
@@ -1163,7 +1165,9 @@ function onCutEnd(){
   cutEndGuard = true;
   const done = track(state.player.trackId);
   if (state.settings.repeat === "one"){
-    const s = span(); audio.currentTime = s.start; armEndWatchdog(); cutEndGuard = false; return;
+    const s = span(); audio.currentTime = s.start; armEndWatchdog(); cutEndGuard = false;
+    if (state.settings.fade > 0) fadeIn();
+    return;
   }
   // "once" hält nach diesem Titel an; "off" hält am Ende der Playlist an.
   const stopHere = repeatMode() === "once" ||
@@ -1224,42 +1228,126 @@ async function togglePlay(){
   else nativeSync(true);
   renderMini(); refreshCurrent();
 }
-/* Blendzeit an den Schnittkanten (dezente Gain-Rampen über audio.volume):
-   Der Fade-Out beginnt VOR dem Schnitt-Ende und trifft dort exakt 0 – bei Fade 4 s
-   und Ende 1:19 laeuft die Rampe von 1:15 bis 1:19; es wird KEIN Audio ueber die
-   Schnittkante hinaus angehaengt. Gestoppt wird ebenfalls stufenlos bei 0. */
-let fadeInIv = 0, fadeOutIv = 0, fadeEndT = -1, fadeWatchdog = null, cutEndGuard = false;
+/* ═══════════════ Gain-Pfad: Lautstaerke + Blendzeit an den Kanten ═══════════════
+   iOS (Safari/WKWebView) ignoriert audio.volume – Apple: "The volume property is
+   not settable in JavaScript." Deshalb liegt der Lautstaerke-Regler dort brach und
+   es gibt weder Blendung noch weicheres Ende. Auf iOS haengen wir das audio-Element
+   deshalb einmal durch Web Audio (MediaElementSource -> GainNode) und blenden dort.
+   Der Regler selbst wirkt auf iOS nur ueber diesen Weg, deshalb ist er dort standard-
+   maessig an. Falls iOS das Web-Audio-Rendering im Hintergrund abwaehlt (wieder hartes
+   Ende / keine Wiedergabe bei Sperrbildschirm): Regler in den Einstellungen auf "Aus"
+   und App neu starten. */
+let waCtx = 0, waSrc = 0, waNode = 0, waOn = false, waPatch = false, waBase = 1;
+const waRouteWanted = () => NATIVE && NATIVE_OS === "iOS" && state.settings.waGain !== false;
+/* Reihenfolge ist Absicht: erst den Kontext zum Laufen bringen, DANCH das Element
+   anbinden. Ein MediaElementSource an einem suspendierten Kontext würde das Element
+   stumm schalten, ohne dass man es zuruecknehmen koennte. */
+async function ensureWaRoute(){
+  if (waOn || !waRouteWanted()) return waOn;
+  try{
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return false;
+    if (!waCtx) waCtx = new AC();
+    // Standard ist ctx.createMediaElementSource(el); aelteres WebKit kennt nur el.createMediaElementSource(ctx).
+    const attach = waCtx.createMediaElementSource
+      ? () => waCtx.createMediaElementSource(audio)
+      : (audio.createMediaElementSource ? () => audio.createMediaElementSource(waCtx) : null);
+    if (!attach) return false;
+    if (waCtx.state !== "running") await waCtx.resume();
+    if (waCtx.state !== "running") return false;
+    waNode = waCtx.createGain();
+    waNode.gain.value = clamp(state.settings.volume, 0, 1) * rampGain;
+    waSrc = attach();
+    waSrc.connect(waNode); waNode.connect(waCtx.destination);
+    waOn = true;
+    patchVolumeForWa();
+    waCtx.addEventListener("statechange", resumeWa);
+  }catch(e){ console.warn("Web-Audio-Gain nicht verfuegbar:", e); waOn = false; }
+  return waOn;
+}
+/* iOS kann den Kontext abwaehlen (Hintergrund, Route-Wechsel) – dann ist der Track
+   stumm, also sobald wie moeglich wieder aufnehmen. */
+function resumeWa(){
+  if (!waOn || !waCtx || waCtx.state === "running" || audio.paused) return;
+  waCtx.resume().catch(() => {});
+}
+/* Der Web-Audio-Pfad uibernimmt die Lautstaerke: audio.volume auf 1, Gain traegt alles. */
+function patchVolumeForWa(){
+  if (waPatch) return;
+  waPatch = true;
+  try{
+    const proto = HTMLMediaElement.prototype, d = Object.getOwnPropertyDescriptor(proto, "volume");
+    if (!d || !d.set) return;
+    Object.defineProperty(audio, "volume", {
+      configurable: true,
+      get(){ return waBase; },
+      set(v){ waBase = clamp(+v || 0, 0, 1); d.set.call(audio, waOn ? 1 : waBase); },
+    });
+  }catch(e){ console.warn("Lautstaerke-Zugriff nicht erweiterbar:", e); }
+}
+function armWaGesture(){
+  if (!waRouteWanted()) return;
+  const kick = () => { ensureWaRoute(); resumeWa(); };
+  ["touchend","pointerup","click","keydown"].forEach(t => document.addEventListener(t, kick, { passive:true }));
+}
+
+let fadeEndT = -1, fadeWatchdog = null, cutEndGuard = false;
+const FADE_MAX = 10;   // längste Blendzeit, die sich einstellen lässt (s)
 /* Nie laenger als die halbe Schnittlaenge – Fade-In und -Out ueberlappen nie. */
 function effFade(s){ return Math.min(state.settings.fade, s.len/2); }
-function fadeIn(){
-  const s = span();
-  const target = state.settings.volume, d = Math.max(.05, s ? effFade(s) : state.settings.fade);
-  const t0 = performance.now();
-  if (fadeInIv){ clearInterval(fadeInIv); fadeInIv = 0; }
-  if (fadeOutIv){ clearInterval(fadeOutIv); fadeOutIv = 0; fadeEndT = -1; } // Fade-In gewinnt, nie gegen einen laufenden Fade-Out schreiben
-  fadeInIv = setInterval(() => {
-    const p = (performance.now()-t0)/(d*1000);
-    if (p >= 1){ audio.volume = target; clearInterval(fadeInIv); fadeInIv = 0; return; }
-    if (!audio.paused) audio.volume = target*p;
-  }, 40);
+/* Rampen-Gain: 0..1, multipliziert mit der Grundlautstaerke. */
+let rampGain = 1, rampOut = null, rampIn = null;
+function setRamp(g){
+  rampGain = clamp(g, 0, 1);
+  const v = clamp(state.settings.volume, 0, 1) * rampGain;
+  if (waOn) waNode.gain.value = v; else audio.volume = v;
 }
-/* Rampe von der aktuellen Lautstaerke auf 0, fertig exakt am aktuellen Schnitt-Ende. */
+/* Eine Rampe: in ramp.d Sekunden auf ramp.to (0 = aus, 1 = Grundlautstaerke).
+   Getaktet wird vom Intervall, vom rAF-loop und vom timeupdate-Ereignis – im
+   Hintergrund drosselt iOS Intervalle auf ~1 s und rAF ruht ganz, die
+   timeupdate-Laeufer des media-Elements laufen dagegen weiter. */
+function stepRamp(r){
+  if (audio.paused) return;
+  const p = (performance.now() - r.t0)/(r.d*1000);
+  if (p >= 1){ endRamp(r); setRamp(r.to); return; }
+  setRamp(r.to === 0 ? 1-p : p);
+}
+function endRamp(r){ if (r && r.iv) clearInterval(r.iv); }
+function newRamp(to, d){
+  const r = { to, d:Math.max(.05, d), t0:performance.now(), iv:0 };
+  r.iv = setInterval(() => stepRamp(r), 40);
+  stepRamp(r);
+  return r;
+}
+function driveRamps(){
+  if (rampOut) stepRamp(rampOut);
+  if (rampIn) stepRamp(rampIn);
+}
+function fadeIn(){
+  endRamp(rampIn); endRamp(rampOut); rampIn = rampOut = null; fadeEndT = -1;
+  const s = span();
+  rampIn = newRamp(1, s ? effFade(s) : state.settings.fade);
+}
+function stopFadeIn(){ endRamp(rampIn); rampIn = null; }
+/* Rampe auf 0, fertig exakt am aktuellen Schnitt-Ende – uhrgetaktet, damit sie auch
+   dann bei 0 ankommt, wenn die Wiedergabeposition (zeitweise) hinterherhinkt. */
 function startFadeTo(){
   const s = span(); if (!s) return;
-  const d = Math.max(.05, s.end - audio.currentTime);
-  const target = state.settings.volume, t0 = performance.now();
+  endRamp(rampIn); rampIn = null;
   fadeEndT = s.end;
-  if (fadeOutIv){ clearInterval(fadeOutIv); fadeOutIv = 0; }
-  fadeOutIv = setInterval(() => {
-    const p = (performance.now()-t0)/(d*1000);
-    if (p >= 1){ clearInterval(fadeOutIv); fadeOutIv = 0; audio.volume = 0; return; }
-    if (!audio.paused) audio.volume = target*(1-p);
-  }, 40);
+  rampOut = newRamp(0, s.end - audio.currentTime);
 }
 function stopFadeOut(restore){
-  if (fadeOutIv){ clearInterval(fadeOutIv); fadeOutIv = 0; }
-  fadeEndT = -1;
-  if (restore) audio.volume = state.settings.volume;
+  endRamp(rampOut); rampOut = null; fadeEndT = -1;
+  if (restore) setRamp(1);
+}
+/* Blenden-Status nach fuehren: laeuft keine Rampe, gilt die Grundlautstaerke direkt
+   (audio.volume bzw. GainNode), damit Reglern und Pausen nichts im Weg steht. */
+function refreshMaster(){
+  if (rampIn || rampOut) return;
+  rampGain = 1;
+  if (waOn) waNode.gain.value = clamp(state.settings.volume, 0, 1);
+  else audio.volume = clamp(state.settings.volume, 0, 1);
 }
 /* Fade-Start zeitlich vorm Schnitt-Ende anstossen – auch im Hintergrund, wo rAF/loop ruht. */
 function armFadeWatchdog(){
@@ -1269,11 +1357,11 @@ function armFadeWatchdog(){
   if (d <= 0){ stopFadeOut(true); return; }
   const ahead = s.end - d - audio.currentTime;
   if (ahead < 0){
-    if (!fadeOutIv && state.player.playing && !audio.paused && audio.currentTime < s.end - 0.03) startFadeTo();
+    if (!rampOut && state.player.playing && !audio.paused && audio.currentTime < s.end - 0.03) startFadeTo();
     return;
   }
   fadeWatchdog = setTimeout(() => {
-    if (state.player.playing && !audio.paused && !fadeOutIv) startFadeTo();
+    if (state.player.playing && !audio.paused && !rampOut) startFadeTo();
   }, ahead*1000);
 }
 
@@ -1281,15 +1369,17 @@ function armFadeWatchdog(){
 let lastPos = -1, lastAdvance = 0, stalledNotified = false;
 function loop(){
   if (state.player.playing && !audio.paused){
+    resumeWa();
     const s = span();
     if (s){
       const d = effFade(s);
       // Seek oder Schnitt-/Einstellungen-Aenderung: laufende Rampe neu bewerten.
-      if (fadeOutIv && (Math.abs(s.end - fadeEndT) > 0.01 ||
+      if (rampOut && (Math.abs(s.end - fadeEndT) > 0.01 ||
           audio.currentTime < s.end - d - 0.06)) stopFadeOut(true);
-      if (!fadeOutIv && d > 0 && audio.currentTime >= s.end - d &&
+      if (!rampOut && d > 0 && audio.currentTime >= s.end - d &&
           audio.currentTime < s.end - 0.03) startFadeTo();
     }
+    driveRamps();
     if (s && audio.currentTime >= s.end - 0.02){ onCutEnd(); }
     else {
       if (!lastAdvance) lastAdvance = performance.now();
@@ -1311,10 +1401,19 @@ function loop(){
   else { lastAdvance = 0; }
   requestAnimationFrame(loop);
 }
-audio.addEventListener("timeupdate", () => { const s = span(); if (s && audio.currentTime >= s.end - 0.02) onCutEnd(); });
+audio.addEventListener("timeupdate", () => {
+  resumeWa();
+  driveRamps();
+  const s = span(); if (!s) return;
+  // Hintergrund: rAF ruht, also Blendung hier ebenfalls anstossen/nachziehen.
+  const d = effFade(s);
+  if (!rampOut && d > 0 && !audio.paused && state.player.playing &&
+      audio.currentTime >= s.end - d && audio.currentTime < s.end - 0.03) startFadeTo();
+  if (audio.currentTime >= s.end - 0.02) onCutEnd();
+});
 audio.addEventListener("ended", () => onCutEnd());
 audio.addEventListener("pause", () => {
-  stopFadeOut(true); // Pause in der Fade-Zone: Volume restaurieren, loop fadelt bei Bedarf neu
+  stopFadeOut(true); stopFadeIn(); // Pause in der Fade-Zone: Volume restaurieren, loop fadelt bei Bedarf neu
   if (state.player.playing){ state.player.playing = false; renderMini(); refreshCurrent(); }
   syncCutPlayBtn();
 });
@@ -1796,6 +1895,10 @@ function renderSet(){
     '<div class="kv"><span class="k">' + T("set.fade") + '</span><span class="v">' + s.fade.toFixed(1) + ' s ' +
     '<button class="btn small" data-act="fade-down" style="margin-left:8px" title="' + T("set.fade_down") + '" aria-label="' + T("set.fade_down") + '">▼</button>' +
     '<button class="btn small" data-act="fade-up" style="margin-left:4px" title="' + T("set.fade_up") + '" aria-label="' + T("set.fade_up") + '">▲</button></span></div>' +
+    (NATIVE_OS === "iOS" ?
+    '<div class="sep"></div>' +
+    '<div class="kv"><span class="k">' + T("set.wa_gain") + '</span><div class="toggle ' + (s.waGain !== false?"on":"") + '" data-act="tgl" data-k="waGain"></div></div>' +
+    '<div class="infoBlock">' + T("set.wa_gain_hint") + '</div>' : "") +
     '<div class="sep"></div>' +
     '<div class="kv"><span class="k">' + T("set.sleep") + '</span><span class="v">' +
     '<button class="btn small" data-act="sleep">' + (s.sleepMin ? T("common.minutes", { n:s.sleepMin }) : T("common.off")) + '</button></span></div>' +
@@ -1925,6 +2028,7 @@ function renderPlayer(){
   const vol = $("#vol");
   vol.addEventListener("input", () => {
     state.settings.volume = +vol.value/100; audio.volume = state.settings.volume;
+    refreshMaster();
     $("#volVal").textContent = vol.value + " %"; saveSettings();
   });
 }
@@ -2444,10 +2548,17 @@ async function handle(act, el){
         p.items.forEach(i => { if (i.cut){ i.cut = null; n++; dirty = true; } });
         if (dirty) await savePlaylist(p); }
       toast(T("toast.cuts_deleted", { n })); refreshCurrent(); renderMini(); break; }
-    case "tgl": state.settings[ds.k] = !state.settings[ds.k]; saveSettings(); renderSet(); break;
+    case "tgl": {
+      // waGain gilt auch ohne gespeicherten Wert als "Ein" – deshalb wirksam negieren.
+      const on = ds.k === "waGain" ? state.settings[ds.k] !== false : !!state.settings[ds.k];
+      state.settings[ds.k] = !on;
+      if (ds.k === "waGain") toast(T("toast.wa_restart"), true);
+      saveSettings(); renderSet(); refreshMaster(); break; }
     case "fade-up": case "fade-down": {
-      const dir = ds.act === "fade-up" ? .5 : -.5;
-      state.settings.fade = clamp(+(state.settings.fade + dir).toFixed(1), 0, 4);
+      const dir = ds.act === "fade-up" ? 1 : -1;
+      const st = state.settings.fade > 4 ? 1 : .5;   // bis 4 s fein, daruber in ganzen Sekunden
+      state.settings.fade = clamp(+(state.settings.fade + dir*st).toFixed(1), 0, FADE_MAX);
+      if (state.player.playing) armEndWatchdog(); // neue Blendzeit gilt sofort weiter
       saveSettings(); renderSet(); toast(T("toast.fade_set", { v:state.settings.fade })); break; }
     case "sleep": { const opts = [0,15,30,45,60];
       state.settings.sleepMin = opts[(opts.indexOf(state.settings.sleepMin)+1) % opts.length];
@@ -2585,6 +2696,7 @@ document.addEventListener("keydown", e => {
   if (state.settings.language && state.settings.language !== Translations.getLanguage())
     await Translations.setLanguage(state.settings.language);
   refreshBtInfo();
+  armWaGesture();
   await registerSW();
   setupNativeBridge();
   if (NATIVE){
