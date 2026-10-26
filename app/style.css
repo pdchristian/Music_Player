@@ -195,6 +195,14 @@ input,select{font:inherit}
 .kv{display:flex;justify-content:space-between;gap:10px;padding:11px 14px;font-size:13px;align-items:center}
 .kv .k{color:var(--text)}
 .kv .v{font-family:Consolas,monospace;font-size:11.5px;text-align:right;color:var(--text-dim)}
+/* Wiederholen-Modi – Segmented Control (Icon + Kurzlabel, aktiver Modus hervorgehoben) */
+.repmodes{display:flex;gap:6px;padding:2px 14px 12px}
+.repmodes .seg{flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;padding:9px 4px;
+  border:1px solid var(--border);border-radius:11px;background:var(--surface-hover);color:var(--text-dim);
+  font-size:11.5px;line-height:1.25;cursor:pointer;white-space:nowrap;transition:background .15s,border-color .15s,color .15s}
+.repmodes .seg .ico{font-size:17px;line-height:1}
+.repmodes .seg.on{background:rgba(0,184,169,.14);border-color:var(--accent);color:var(--accent);font-weight:700}
+.repmodes .seg:active{transform:scale(.97)}
 /* Sprachauswahl in den Einstellungen – Optik wie .btn.small */
 #langSel{border:1px solid var(--border);border-radius:10px;padding:7px 10px;font-size:12px;
   background:var(--surface);color:var(--text);font-family:inherit;cursor:pointer;max-width:170px}
@@ -225,6 +233,9 @@ input,select{font:inherit}
   border-radius:9px;padding:7px 12px;font-size:12px;font-weight:700;cursor:pointer}
 .nudge button:active{border-color:var(--accent);color:var(--accent)}
 .nudge button.sel{border-color:var(--purple);color:var(--purple)}
+/* Transport-Leiste im Schnittfenster: Zurück · Start · Play/Pause · Ende · Vor */
+.cutnav{display:flex;gap:6px;margin-top:12px;flex-wrap:wrap}
+.cutnav .btn{flex:1;min-width:58px;white-space:nowrap;padding:9px 6px;text-align:center}
 
 /* ── Player-Vollbild ───────────────────────────────────────────────────── */
 .playerHead{display:flex;align-items:center;gap:10px;padding:14px 16px 2px}

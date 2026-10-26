@@ -14,7 +14,7 @@
    (BeatClipMedia.appInfo) – die Konstanten dienen nur als Fallback (PWA, iOS ohne
    Plugin-Antwort) und sollten mit android/app/build.gradle bzw. ios/…/project.pbxproj
    mitlaufen. */
-let APP_VER = "1.2.1", APP_BUILD = 5;
+let APP_VER = "1.2.2", APP_BUILD = 6;
 
 /* ─────────────────────────── Utils ───────────────────────────────────── */
 const $  = s => document.querySelector(s);
@@ -55,6 +55,24 @@ const state = {
              volume:0.9, sleepMin:0, plFirstRun:true, language:"" },
   bt:{ active:false, label:"" },   // label setzt refreshBtInfo() übersetzt
 };
+
+/* Wiederholungs-Modus – Reihenfolge des Zyklus (Wiederholen-Button):
+   off  : normal – am Ende des Titels/Schnitts zum nächsten Titel springen
+   once : 1▸ – nur diesen Titel bis zum Ende spielen, dann stoppen
+   all  : 🔁 – am Ende der Playlist wieder von vorn
+   one  : 🔂 – aktuellen Titel dauerhaft wiederholen */
+const REPEAT_MODES = ["off","once","all","one"];
+const repeatMode = () => (REPEAT_MODES.includes(state.settings.repeat) ? state.settings.repeat : "all");
+const repeatLabel = m => m === "once" ? T("set.repeat_once")
+                     : m === "one"    ? T("set.repeat_one")
+                     : m === "all"    ? T("set.repeat_all")
+                     :                  T("set.repeat_off");
+const repeatIcon = m => m === "once" ? "1▸" : m === "one" ? "🔂" : "🔁";
+const repeatSegIcon = m => m === "off" ? "▶" : repeatIcon(m);
+const repeatShort = m => m === "once" ? T("set.repeat_seg_once")
+                     : m === "one"    ? T("set.repeat_seg_one")
+                     : m === "all"    ? T("set.repeat_seg_all")
+                     :                  T("set.repeat_seg_off");
 
 /* ─────────────────────────── IndexedDB ───────────────────────────────── */
 const DB_NAME = "beatclip", DB_VER = 1;
@@ -697,12 +715,18 @@ async function playItem(qItem, plId){
     t.dur = audio.duration; idbPut("tracks", t);
   }
   try{ audio.currentTime = clamp(from, 0, audio.duration); }catch(e){}
-  await audio.play();
+  fadingOut = false; // manueller Trackwechsel waehrend eines laufenden Fade-Outs
+  try{ await audio.play(); }
+  catch(e){ // Autoplay-Sperre o. A.: nicht mit stummer Wiedergabe/0 % Volume enden
+    state.player.playing = false; audio.volume = state.settings.volume;
+    renderMini(); refreshCurrent(); return;
+  }
   state.player.playing = true;
   if (t.dur !== audio.duration && isFinite(audio.duration) && audio.duration > 0){
     t.dur = audio.duration; idbPut("tracks", t);
   }
   t.lastPlay = Date.now(); idbPut("tracks", t);
+  if (fadeOutIv){ clearInterval(fadeOutIv); fadeOutIv = 0; } // laufenden Fade-Out nicht auf den neuen Track weiterlaufen lassen
   armEndWatchdog();
   setupIOSAudioSession();
   updateMediaSession();
@@ -720,30 +744,46 @@ function armEndWatchdog(){
     else armEndWatchdog();
   }, ahead*1000);
 }
+function stopPlayback(){
+  audio.pause(); state.player.playing = false; fadingOut = false;
+  nativeStopSession(); renderMini(); refreshCurrent();
+}
 function onCutEnd(){
+  // Guard: loop()+timeupdate+ended+Watchdog koennten onCutEnd mehrfach feuern.
+  if (fadingOut) return;
   const done = track(state.player.trackId);
   if (state.settings.repeat === "one"){
     const s = span(); audio.currentTime = s.start; armEndWatchdog(); return;
   }
-  if (state.qIndex >= state.queue.length-1 && state.settings.repeat === "off"){
-    audio.pause(); state.player.playing = false;
-    nativeStopSession();
-    toast(T("toast.cut_end_stop", { title:done.title, end:mmssPrecise(span().end) }));
-    renderMini(); refreshCurrent(); return;
+  // "once" hält nach diesem Titel an; "off" hält am Ende der Playlist an.
+  const stopHere = repeatMode() === "once" ||
+    (state.qIndex >= state.queue.length-1 && state.settings.repeat === "off");
+  if (stopHere){
+    stopPlayback();
+    toast(T("toast.cut_end_stop", { title:done ? done.title : "", end:mmssPrecise(span().end) }));
+    return;
   }
-  nextTrack(false);
+  // Fade-Out vor dem Uebergang, damit es an der Schnittkante nicht hart abschneidet.
+  fadingOut = true;
+  fadeOutThen(() => { fadingOut = false; nextTrack(false); });
   toast(T("toast.cut_end_next", { title:done ? done.title : "", end:mmssPrecise(span().end) }));
 }
 async function nextTrack(manual){
   clearTimeout(endWatchdog);
   if (!state.queue.length) return;
+  // "once" (1▸): automatisches Weiterspringen ist verboten – Titel endet hier.
+  if (!manual && repeatMode() === "once"){ stopPlayback(); return; }
   const s = span();
   if (state.settings.shuffle && state.queue.length > 1){
     let i; do { i = Math.floor(Math.random()*state.queue.length); } while (i === state.qIndex);
     return playItem(state.queue[i], currentItem()?.pl.id);
   }
-  if (s && s.end - audio.currentTime < 1){
-    audio.currentTime = clamp(s.start, 0, audio.duration); armEndWatchdog(); return;
+  // Restart am Schnittanfang nur bei manuellem Springen; automatisches Cut-Ende
+  // soll immer zum naechsten Titel weitergehen (sonst Endlosschleife desselben Titels).
+  if (manual && s && s.end - audio.currentTime < 1){
+    audio.currentTime = clamp(s.start, 0, audio.duration); armEndWatchdog();
+    if (state.settings.fade > 0) fadeIn();
+    return;
   }
   let idx = state.qIndex + 1;
   if (idx >= state.queue.length){
@@ -774,22 +814,26 @@ async function togglePlay(){
   renderMini(); refreshCurrent();
 }
 /* Blendzeit an den Schnittkanten (dezenter Gain-Ramp über audio.volume) */
+let fadeInIv = 0, fadeOutIv = 0, fadingOut = false;
 function fadeIn(){
   const target = state.settings.volume, d = Math.max(.05, state.settings.fade);
   const t0 = performance.now();
-  const iv = setInterval(() => {
+  if (fadeInIv){ clearInterval(fadeInIv); fadeInIv = 0; }
+  if (fadeOutIv){ clearInterval(fadeOutIv); fadeOutIv = 0; } // Fade-In winning, nie gegen einen laufenden Fade-Out schreiben
+  fadeInIv = setInterval(() => {
     const p = (performance.now()-t0)/(d*1000);
-    if (p >= 1){ audio.volume = target; clearInterval(iv); return; }
+    if (p >= 1){ audio.volume = target; clearInterval(fadeInIv); fadeInIv = 0; return; }
     if (!audio.paused) audio.volume = target*p;
   }, 40);
 }
 function fadeOutThen(cb){
+  if (!(state.settings.fade > 0)){ cb(); return; }
   const d = Math.max(.05, state.settings.fade);
-  if (!d || !state.settings.gapless){ cb(); return; }
   const target = state.settings.volume, t0 = performance.now();
-  const iv = setInterval(() => {
+  if (fadeOutIv){ clearInterval(fadeOutIv); fadeOutIv = 0; }
+  fadeOutIv = setInterval(() => {
     const p = (performance.now()-t0)/(d*1000);
-    if (p >= 1){ clearInterval(iv); audio.volume = 0; cb(); return; }
+    if (p >= 1){ clearInterval(fadeOutIv); fadeOutIv = 0; audio.volume = 0; cb(); return; }
     audio.volume = target*(1-p);
   }, 40);
 }
@@ -822,8 +866,8 @@ function loop(){
 }
 audio.addEventListener("timeupdate", () => { const s = span(); if (s && audio.currentTime >= s.end - 0.02) onCutEnd(); });
 audio.addEventListener("ended", () => onCutEnd());
-audio.addEventListener("pause", () => { if (state.player.playing){ state.player.playing = false; renderMini(); refreshCurrent(); } });
-audio.addEventListener("play",  () => { if (!state.player.playing){ state.player.playing = true; renderMini(); refreshCurrent(); } });
+audio.addEventListener("pause", () => { if (state.player.playing){ state.player.playing = false; renderMini(); refreshCurrent(); } syncCutPlayBtn(); });
+audio.addEventListener("play",  () => { if (!state.player.playing){ state.player.playing = true; renderMini(); refreshCurrent(); } syncCutPlayBtn(); });
 
 audio.addEventListener("error", () => {
   if (!audio.error) return;   // src entfernt = kein Fehler
@@ -1287,13 +1331,18 @@ function renderSet(){
     '</div>' +
     '<div class="sectionHeading">' + T("set.playback_section") + ' <span class="line"></span></div>' +
     '<div class="panel">' +
-    '<div class="kv"><span class="k">' + T("set.repeat") + '</span><span class="v">' +
-    '<button class="btn small" data-act="cycle-repeat">' + (s.repeat === "all" ? T("set.repeat_all") : s.repeat === "one" ? T("set.repeat_one") : T("set.repeat_off")) + '</button></span></div>' +
+    '<div class="kv"><span class="k">' + T("set.repeat") + '</span><span class="v">' + repeatLabel(repeatMode()) + '</span></div>' +
+    '<div class="repmodes" role="group" aria-label="' + esc(T("set.repeat")) + '">' +
+    REPEAT_MODES.map(m => '<button class="seg' + (repeatMode() === m ? " on" : "") +
+      '" data-act="set-repeat" data-mode="' + m + '" title="' + esc(repeatLabel(m)) + '">' +
+      '<span class="ico">' + repeatSegIcon(m) + '</span><span>' + repeatShort(m) + '</span></button>').join("") +
+    '</div>' +
     '<div class="sep"></div>' +
     '<div class="kv"><span class="k">' + T("set.shuffle") + '</span><div class="toggle ' + (s.shuffle?"on":"") + '" data-act="tgl" data-k="shuffle"></div></div>' +
     '<div class="sep"></div>' +
     '<div class="kv"><span class="k">' + T("set.fade") + '</span><span class="v">' + s.fade.toFixed(1) + ' s ' +
-    '<button class="btn small" data-act="fade-step" style="margin-left:8px">' + T("button.change") + '</button></span></div>' +
+    '<button class="btn small" data-act="fade-down" style="margin-left:8px" title="' + T("set.fade_down") + '" aria-label="' + T("set.fade_down") + '">▼</button>' +
+    '<button class="btn small" data-act="fade-up" style="margin-left:4px" title="' + T("set.fade_up") + '" aria-label="' + T("set.fade_up") + '">▲</button></span></div>' +
     '<div class="sep"></div>' +
     '<div class="kv"><span class="k">' + T("set.sleep") + '</span><span class="v">' +
     '<button class="btn small" data-act="sleep">' + (s.sleepMin ? T("common.minutes", { n:s.sleepMin }) : T("common.off")) + '</button></span></div>' +
@@ -1390,7 +1439,7 @@ function renderPlayer(){
     '<button class="ctlBtn" data-act="prev" title="' + T("player.prev") + '">⏮</button>' +
     '<button class="ctlBtn big" id="btnPlay" data-act="toggle-play">' + (state.player.playing ? "⏸" : "▶") + '</button>' +
     '<button class="ctlBtn" data-act="next" title="' + T("player.next") + '">⏭</button>' +
-    '<button class="ctlBtn ' + (state.settings.repeat!=="off"?"on":"") + '" data-act="cycle-repeat" title="' + T("set.repeat") + '">' + (state.settings.repeat==="one"?"🔂":"🔁") + '</button>' +
+    '<button class="ctlBtn ' + (repeatMode()!=="off"?"on":"") + '" data-act="cycle-repeat" aria-label="' + esc(T("set.repeat")) + '" title="' + esc(T("set.repeat") + ": " + repeatLabel(repeatMode())) + '">' + repeatIcon(repeatMode()) + '</button>' +
     '</div>' +
     '<div class="skipRow">' +
     '<button class="btn" data-act="seek-start">' + T("player.seek_start") + '</button>' +
@@ -1438,7 +1487,7 @@ function updatePlayerUI(){
 }
 function drawPlayerTimeline(){
   const cv = $("#pWave"), tl = $("#pTimeline"); if (!cv || !tl) return;
-  const s = span();
+  const s = span(); if (!s) return;
   drawWave(cv, tl.clientWidth, tl.clientHeight, state.player.trackId, s);
   const dur = (audio.duration && isFinite(audio.duration)) ? audio.duration : (s.dur || 1);
   $("#hStart").style.left = (s.start/dur*100) + "%";
@@ -1526,11 +1575,15 @@ async function openCutEditor(trackId, plId){
     '<button data-act="nudge" data-d="5">+5 s</button>' +
     '</div>' +
     '<div class="mono" style="text-align:center;margin-top:8px">' + T("cut.hint") + '</div>' +
-    '<div class="btnrow" style="margin-bottom:0">' +
-    '<button class="btn" data-act="cut-play">' + T("cut.play_mid") + '</button>' +
-    '<button class="btn" data-act="cut-reset">' + T("cut.remove") + '</button>' +
+    '<div class="cutnav">' +
+    '<button class="btn small" data-act="cut-nav" data-nav="back">' + T("cut.nav_back") + '</button>' +
+    '<button class="btn small" data-act="cut-nav" data-nav="start">' + T("cut.nav_start") + '</button>' +
+    '<button class="btn small primary" data-act="cut-nav" data-nav="play" id="cutPlayBtn">' + T("cut.nav_play") + '</button>' +
+    '<button class="btn small" data-act="cut-nav" data-nav="end">' + T("cut.nav_end") + '</button>' +
+    '<button class="btn small" data-act="cut-nav" data-nav="fwd">' + T("cut.nav_fwd") + '</button>' +
     '</div>' +
     '<div class="sheetbtns" style="margin-top:10px">' +
+    '<button class="btn danger" data-act="cut-reset">' + T("button.delete") + '</button>' +
     '<button class="btn" data-act="sheet-close">' + T("button.cancel") + '</button>' +
     '<button class="btn primary" data-act="cut-save">' + T("cut.save") + '</button>' +
     '</div>');
@@ -1549,6 +1602,26 @@ async function openCutEditor(trackId, plId){
 }
 function editedItem(){
   return state.playlists.flatMap(p => p.items).find(i => i.id === state.ui.editItem);
+}
+/* Titel des offenen Schnittfensters laden (falls noch nicht im Player) */
+async function ensureSheetAudio(){
+  const it = editedItem(); const t = track(state.ui.editTrack);
+  if (!it || !t) return null;
+  if (state.player.trackId !== t.id){
+    const url = await blobURL(t.id);
+    if (!url){ toast(T("toast.file_missing"), true); return null; }
+    audio.src = url; state.player.trackId = t.id;
+    const found = state.playlists.flatMap(p => p.items.map(i => ({pl:p, it:i}))).find(x => x.it.id === state.ui.editItem);
+    if (found){ state.queue = found.pl.items.map(i => i.id); state.qIndex = state.queue.indexOf(found.it.id); }
+    await new Promise(res => { audio.addEventListener("loadedmetadata", res, { once:true }); setTimeout(res, 1200); });
+  }
+  return { it, t };
+}
+/* Play/Pause-Beschriftung des Transport-Buttons im Schnittfenster nachziehen */
+function syncCutPlayBtn(){
+  const b = $("#cutPlayBtn"); if (!b) return;
+  const on = state.player.trackId === state.ui.editTrack && state.player.playing && !audio.paused;
+  b.textContent = on ? T("cut.nav_pause") : T("cut.nav_play");
 }
 function drawEditorWave(){
   const wrap = $("#wWaveWrap"); if (!wrap) return;
@@ -1571,6 +1644,7 @@ function updateEditorHead(){
   $("#cEnd").textContent = mmssPrecise(it.cut.end);
   $("#cDur").textContent = mmssPrecise(it.cut.end - it.cut.start);
   drawEditorWave();
+  syncCutPlayBtn();
 }
 
 function clearPlaylistDropTarget(){
@@ -1825,9 +1899,15 @@ async function handle(act, el){
     case "next": nextTrack(true); break;
     case "prev": prevTrack(); break;
     case "tgl-shuffle": state.settings.shuffle = !state.settings.shuffle; saveSettings(); refreshCurrent(); break;
-    case "cycle-repeat": { const r = state.settings.repeat;
-      state.settings.repeat = r === "all" ? "one" : r === "one" ? "off" : "all";
-      saveSettings(); refreshCurrent(); break; }
+    case "cycle-repeat": {
+      const i = REPEAT_MODES.indexOf(repeatMode());
+      state.settings.repeat = REPEAT_MODES[(i+1) % REPEAT_MODES.length];
+      saveSettings(); refreshCurrent();
+      toast(T("toast.repeat_set", { v:repeatLabel(state.settings.repeat) })); break; }
+    case "set-repeat": {
+      if (!REPEAT_MODES.includes(ds.mode)) break;
+      state.settings.repeat = ds.mode; saveSettings(); renderSet(); refreshCurrent();
+      toast(T("toast.repeat_set", { v:repeatLabel(state.settings.repeat) })); break; }
     case "seek-start": { const s = span(); if (s){ audio.currentTime = s.start; armEndWatchdog(); } break; }
     case "seek-end": { const s = span(); if (s){ audio.currentTime = Math.max(s.start, s.end - .2); armEndWatchdog(); } break; }
     case "edit-cut": closeSheet(); openCutEditor(ds.t, ds.pl || (currentItem() ? currentItem().pl.id : null)); break;
@@ -1902,8 +1982,10 @@ async function handle(act, el){
         if (dirty) await savePlaylist(p); }
       toast(T("toast.cuts_deleted", { n })); refreshCurrent(); renderMini(); break; }
     case "tgl": state.settings[ds.k] = !state.settings[ds.k]; saveSettings(); renderSet(); break;
-    case "fade-step": state.settings.fade = (state.settings.fade + .5) > 4 ? 0 : +(state.settings.fade + .5).toFixed(1);
-      saveSettings(); renderSet(); toast(T("toast.fade_set", { v:state.settings.fade })); break;
+    case "fade-up": case "fade-down": {
+      const dir = ds.act === "fade-up" ? .5 : -.5;
+      state.settings.fade = clamp(+(state.settings.fade + dir).toFixed(1), 0, 4);
+      saveSettings(); renderSet(); toast(T("toast.fade_set", { v:state.settings.fade })); break; }
     case "sleep": { const opts = [0,15,30,45,60];
       state.settings.sleepMin = opts[(opts.indexOf(state.settings.sleepMin)+1) % opts.length];
       saveSettings(); renderSet();
@@ -1945,20 +2027,25 @@ async function handle(act, el){
     case "cut-reset": { const it = editedItem(); const t = track(state.ui.editTrack);
       it.cut = { start:0, end:t.dur || audio.duration || 0 }; updateEditorHead();
       toast(T("toast.cut_reset")); break; }
-    case "cut-play": {
-      const it = editedItem(); const t = track(state.ui.editTrack);
-      const mid = it.cut ? (it.cut.start + it.cut.end)/2 : 0;
-      if (state.player.trackId !== t.id){
-        const url = await blobURL(t.id);
-        if (!url){ toast(T("toast.file_missing"), true); break; }
-        audio.src = url; state.player.trackId = t.id;
-        const found = state.playlists.flatMap(p => p.items.map(i => ({pl:p, it:i}))).find(x => x.it.id === state.ui.editItem);
-        if (found){ state.queue = found.pl.items.map(i => i.id); state.qIndex = state.queue.indexOf(found.it.id); }
-        await new Promise(res => { audio.addEventListener("loadedmetadata", res, { once:true }); setTimeout(res, 1200); });
+    case "cut-nav": {
+      const r = await ensureSheetAudio(); if (!r) break;
+      const it = r.it, t = r.t, nav = ds.nav;
+      const dur = audio.duration || t.dur || 0;
+      if (nav === "play"){
+        if (audio.paused){
+          await audio.play(); state.player.playing = true;
+          if (!nativeSessionOn) nativeStartSession(); else nativeSync(true);
+          armEndWatchdog(); setupIOSAudioSession(); updateMediaSession();
+        } else { audio.pause(); state.player.playing = false; nativeSync(true); }
+      } else {
+        const lo = it.cut ? it.cut.start : 0, hi = Math.max(lo, (it.cut ? it.cut.end : dur) - .2);
+        const to = nav === "start" ? lo : nav === "end" ? hi
+          : nav === "back" ? Math.max(lo, audio.currentTime - 5)
+          : Math.min(hi, audio.currentTime + 5);
+        audio.currentTime = clamp(to, 0, dur);
+        armEndWatchdog();
       }
-      audio.currentTime = clamp(mid, 0, audio.duration);
-      await audio.play(); armEndWatchdog(); setupIOSAudioSession(); updateMediaSession();
-      renderMini(); refreshCurrent(); break; }
+      syncCutPlayBtn(); renderMini(); refreshCurrent(); break; }
     case "nudge": {
       const it = editedItem(); const t = track(state.ui.editTrack); const d = +ds.d;
       const dur = t.dur || audio.duration || 0;
