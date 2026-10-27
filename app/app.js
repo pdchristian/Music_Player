@@ -14,7 +14,7 @@
    (BeatClipMedia.appInfo) – die Konstanten dienen nur als Fallback (PWA, iOS ohne
    Plugin-Antwort) und sollten mit android/app/build.gradle bzw. ios/…/project.pbxproj
    mitlaufen. */
-let APP_VER = "1.3.4", APP_BUILD = 14;
+let APP_VER = "1.3.5", APP_BUILD = 15;
 
 /* ─────────────────────────── Utils ───────────────────────────────────── */
 const $  = s => document.querySelector(s);
@@ -1131,6 +1131,7 @@ async function playItem(qItem, plId){
   /* iOS: Titel als Audio-Puffer bereitlegen, das Element wird stummer Taktgeber.
      Schlaegt die Dekodierung fehl, bleibt der bisherige Pfad (Element hoerbar) erhalten. */
   bufOn = false;
+  if (bufSrc && bufSrc.trackId !== it.trackId) stopBuf();  // alter Titel darf nicht weiterklingen
   if (bufWanted() && waOn){
     if (await ensureBuf(it.trackId)) bufOn = true; else toast(T("toast.wa_buf_failed"), true);
   } else stopBuf();
@@ -1179,8 +1180,9 @@ function armEndWatchdog(){
   }, ahead*1000);
 }
 function stopPlayback(){
-  stopFadeOut(true); stopFadeIn(); clearTimeout(fadeWatchdog); cutEndGuard = false;
-  audio.pause(); state.player.playing = false;
+  clearTimeout(fadeWatchdog); cutEndGuard = false;
+  audio.pause(); state.player.playing = false;   // erst stoppen, dann Lautstaerke restoring
+  stopFadeOut(true); stopFadeIn();               // sonst springt der Gain von 0 auf volle Stufe
   nativeStopSession(); renderMini(); refreshCurrent();
 }
 function onCutEnd(){
@@ -1372,7 +1374,7 @@ function patchVolumeForWa(){
    Element auf iOS zum reinen Taktgeber (muted) und die Hoerbarkeit kommt aus einem
    per decodeAudioData gewonnenen AudioBuffer, der dasselbe GainNode durchlaeuft.
    Saemtliche Positions-, Schnitt- und Loop-Logik bleibt unveraendert am Element. */
-let bufCache = new Map(), bufSrc = 0, bufStartCtx = 0, bufStartPos = 0, bufOn = false, bufFail = false;
+let bufCache = new Map(), bufSrc = 0, bufOn = false, bufFail = false;
 const bufWanted = () => waRouteWanted() && state.settings.waBuf !== false && IS_IOS();
 
 async function ensureBuf(trackId){
@@ -1398,24 +1400,44 @@ async function ensureBuf(trackId){
     return false;
   }
 }
+/* Jede Quelle bekommt ihr eigenes Ein-/Ausblend-Glied: ein BufferSource, der mitten
+   auf einer Kurve ansetzt oder abgeschnitten wird, knallt sonst deutlich hoerbar. */
 function startBuf(pos){
   const buf = bufCache.get(state.player.trackId);
   if (!buf || !waOn || !waCtx || waCtx.state !== "running") return;
-  stopBuf();
-  const n = waCtx.createBufferSource();
-  n.buffer = buf; n.connect(waNode);
-  n.onended = () => { if (bufSrc === n) bufSrc = 0; };
-  const t0 = waCtx.currentTime + 0.02;
+  /* seeked + loop() koennen denselben Anstoss doppelt liefern – dann wuerde die
+     gerade erst gestartete Quelle sofort wieder aus- und neu eingeblendet (Loechen).
+     Nur fuer dieselbe Quelle gelten lassen, sonst spielt ein Titelwechsel den alten
+     Puffer weiter. */
+  if (bufSrc && bufSrc.buf === buf && Math.abs(bufPos() - pos) < 0.05) return;
+  fadeOutBuf(0.008);
+  const gate = waCtx.createGain(); gate.gain.value = 0; gate.connect(waNode);
+  const node = waCtx.createBufferSource(); node.buffer = buf; node.connect(gate);
+  const t0 = waCtx.currentTime + 0.006;
+  node.onended = () => { if (bufSrc && bufSrc.node === node) bufSrc = 0; try{ gate.disconnect(); }catch(e){} };
+  gate.gain.setValueAtTime(0, t0);
+  gate.gain.linearRampToValueAtTime(1, t0 + 0.008);
   const from = clamp(pos + (t0 - waCtx.currentTime), 0, Math.max(0, buf.duration - 0.02));
-  n.start(t0, from);
-  bufSrc = n; bufStartCtx = t0; bufStartPos = from;
+  node.start(t0, from);
+  bufSrc = { node, gate, t0, from, buf, trackId: state.player.trackId };
 }
-function stopBuf(){
-  if (!bufSrc) return;
-  const n = bufSrc; bufSrc = 0;
-  try{ n.onended = null; n.stop(); }catch(e){}
+/* Ausblenden statt abschneiden – kurz genug, um eine Pause noch direkt wirken zu
+   lassen, aber lang genug, damit es nicht hoerbar abwaergt. */
+function fadeOutBuf(secs){
+  const rec = bufSrc; if (!rec) return;
+  bufSrc = 0;
+  secs = secs || 0.012;
+  const t = waCtx.currentTime;
+  try{
+    rec.gate.gain.cancelScheduledValues(t);
+    rec.gate.gain.setValueAtTime(rec.gate.gain.value, t);
+    rec.gate.gain.linearRampToValueAtTime(0, t + secs);
+    rec.node.onended = () => { try{ rec.gate.disconnect(); }catch(e){} };
+    rec.node.stop(t + secs + 0.005);
+  }catch(e){ try{ rec.node.stop(); }catch(e2){} }
 }
-const bufPos = () => bufSrc ? bufStartPos + (waCtx.currentTime - bufStartCtx) : -1;
+const stopBuf = () => fadeOutBuf();
+const bufPos = () => bufSrc ? bufSrc.from + (waCtx.currentTime - bufSrc.t0) : -1;
 /* Das Element fuehrt die Zeit, der Puffer muss hoeren: nach seek/pause/play oder
    bei Abweichung neu ansetzen. Kleine Drift wird hoerfrei ueber die Wiedergaberate
    ausgeglichen, grosse versetzt den Puffer direkt. */
@@ -1426,9 +1448,10 @@ function syncBuf(){
   if (!bufSrc){ startBuf(audio.currentTime); return; }
   const drift = bufPos() - audio.currentTime;
   if (Math.abs(drift) > 1.5){ startBuf(audio.currentTime); return; }
-  if (bufSrc.playbackRate && Math.abs(drift) > 0.05){
+  const rate = bufSrc.node.playbackRate;
+  if (rate && Math.abs(drift) > 0.05){
     const want = clamp(1 - drift/Math.max(1, audio.duration || 1)*0.5, 0.97, 1.03);
-    if (Math.abs(bufSrc.playbackRate.value - want) > 0.002) bufSrc.playbackRate.value = want;
+    if (Math.abs(rate.value - want) > 0.002) rate.value = want;
   }
 }
 function armWaGesture(){
@@ -1443,10 +1466,16 @@ const FADE_MAX = 10;   // längste Blendzeit, die sich einstellen lässt (s)
 function effFade(s){ return Math.min(state.settings.fade, s.len/2); }
 /* Rampen-Gain: 0..1, multipliziert mit der Grundlautstaerke. */
 let rampGain = 1, rampOut = null, rampIn = null;
+/* Gain-Werte nie als Stufensprung setzen – jeder Sprung auf der Kurve ist ein
+   hoeren Knacksen. setTargetAtTime faengt den Wert innerhalb ~15 ms weich ab. */
+function setGain(param, v){
+  try{ const t = waCtx.currentTime; param.cancelScheduledValues(t); param.setTargetAtTime(v, t, 0.015); }
+  catch(e){ param.value = v; }
+}
 function setRamp(g){
   rampGain = clamp(g, 0, 1);
   const v = clamp(state.settings.volume, 0, 1) * rampGain;
-  if (waOn) waNode.gain.value = v; else audio.volume = v;
+  if (waOn) setGain(waNode.gain, v); else audio.volume = v;
 }
 /* Eine Rampe: in ramp.d Sekunden auf ramp.to (0 = aus, 1 = Grundlautstaerke).
    Getaktet wird vom Intervall, vom rAF-loop und vom timeupdate-Ereignis – im
@@ -1486,14 +1515,14 @@ function startFadeTo(){
 }
 function stopFadeOut(restore){
   endRamp(rampOut); rampOut = null; fadeEndT = -1;
-  if (restore) setRamp(1);
+  if (restore) setRamp(1);  // setGain() laeuft weich (15 ms), ein Stufensprung wuerde knacken
 }
 /* Blenden-Status nach fuehren: laeuft keine Rampe, gilt die Grundlautstaerke direkt
    (audio.volume bzw. GainNode), damit Reglern und Pausen nichts im Weg steht. */
 function refreshMaster(){
   if (rampIn || rampOut) return;
   rampGain = 1;
-  if (waOn) waNode.gain.value = clamp(state.settings.volume, 0, 1);
+  if (waOn) setGain(waNode.gain, clamp(state.settings.volume, 0, 1));
   else audio.volume = clamp(state.settings.volume, 0, 1);
 }
 /* Fade-Start zeitlich vorm Schnitt-Ende anstossen – auch im Hintergrund, wo rAF/loop ruht. */

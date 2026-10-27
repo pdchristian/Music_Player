@@ -72,7 +72,7 @@ Mac-App **Transporter** zum Hochladen verwenden.
 
 **Version/Build** kommen aus `ios/App/App.xcodeproj` (`MARKETING_VERSION`,
 `CURRENT_PROJECT_VERSION`) und halten zu `app/app.js` (`APP_VER`/`APP_BUILD`) und
-`android/app/build.gradle` (aktuell **1.3.4**, Build **14**). App Store Connect weist einen
+`android/app/build.gradle` (aktuell **1.3.5**, Build **15**). App Store Connect weist einen
 Upload ab, wenn die Build-Nummer innerhalb derselben Version schon vergeben ist – dann
 `CURRENT_PROJECT_VERSION` erhöhen und neu archivieren. Beim ersten Upload fragt
 App Store Connect nach der **Export Compliance**; die App nutzt nur Standard-TLS, die
@@ -193,6 +193,17 @@ Auch Now-Playing-Seeking und die Headset-Tasten stoppen bzw. springen innerhalb 
   Element-Pfad zurück – sichtbar als Status „Puffer fehlt“ plus Toast.
   Abschaltbar in den **Einstellungen → „Wiedergabe über Audio-Puffer (iOS)“**; wirkt ab dem
   nächsten Titelstart. Fällt der Ton bei gesperrtem Bildschirm aus, hier ausschalten.
+- **Knacken/Knistern am Blend-Ende behoben (Build 15).** Jeder Sprung auf der Gain-Kurve ist
+  hörbar: bisher wurde der Master-Gain per `gain.value = …` gesetzt, der Puffer-Ton hart mit
+  `source.stop()` beendet und beim Stoppen die Lautstärke **vor** dem Pausieren zurückgesetzt.
+  Deshalb: jeder Master-Gain über `setGain()` (weiche `setTargetAtTime`-Rampe, ~15 ms), jeder
+  Puffer-Ton über ein eigenes Gate (`startBuf` blendet in ~8 ms ein, `fadeOutBuf()` aus und
+  stoppt erst danach), `stopPlayback()` pausiert zuerst und stellt die Lautstärke danach weich
+  wieder her, und `startBuf()` startet nicht zweimal (doppelter Start ließ ~8 ms Stille =
+  Knackser). Nachgemessen im Browser mit Zweite-Differenz-Detektor (`|s[i]−2s[i−1]+s[i−2]|`,
+  Schwelle 0,02): Loop-Neustart, Pause bei voller Lautstärke, Stopp am Schnitt-Ende, Suche und
+  vier Schnellsuchen = **0 Knackser**; eine eingebaute synthetische Referenz (Sprung 0,3) wird
+  sicher gefunden.
 
 ---
 
@@ -227,6 +238,11 @@ Auch Now-Playing-Seeking und die Headset-Tasten stoppen bzw. springen innerhalb 
   (Version/Build in denselben Einstellungen vergleichen) – oder die App erkennt das Gerät
   nicht als iOS. Dann zählt nur der Test, ob `audio.volume` wirkungslos ist; der wird vor
   jedem Titelstart automatisch gemacht (`audio.volume setzbar: …` im Geräteprotokoll).
+- **Knacken / Knistern genau dann, wenn die Blendung bei 0 ankommt und die Wiedergabe
+  stoppt**: war ein Fehler in Build ≤ 14 (Gain-Sprung plus hartes `source.stop()`). Ab Build 15
+  laufen alle Lautstärke-Änderungen weich und der Puffer-Ton wird vor dem Stop ausgeblendet.
+  Tritt es trotzdem auf: Version prüfen (⚙️ ganz unten) und ggf. „Wiedergabe über Audio-Puffer
+  (iOS)“ ausschalten – dann stammt der Ton wieder direkt vom Media-Element.
 - Spielt die App bei gesperrtem Bildschirm **gar nicht** oder bricht sie dort hart ab
   (iOS hat das Web-Audio-Rendering abgewählt): Schalter auf **Aus** und App neu starten –
   dann läuft wieder der reine `audio`-Pfad (ohne Blendung, aber ohne Hintergrundrisiko).
