@@ -14,7 +14,7 @@
    (BeatClipMedia.appInfo) – die Konstanten dienen nur als Fallback (PWA, iOS ohne
    Plugin-Antwort) und sollten mit android/app/build.gradle bzw. ios/…/project.pbxproj
    mitlaufen. */
-let APP_VER = "1.3.3", APP_BUILD = 13;
+let APP_VER = "1.3.4", APP_BUILD = 14;
 
 /* ─────────────────────────── Utils ───────────────────────────────────── */
 const $  = s => document.querySelector(s);
@@ -52,7 +52,7 @@ const state = {
   queue:[], qIndex:-1,
   player:{ trackId:null, playing:false },
   settings:{ theme:"dark", repeat:"all", shuffle:false, fade:1.0, gapless:true,
-             volume:0.9, sleepMin:0, plFirstRun:true, language:"", waGain:true },
+             volume:0.9, sleepMin:0, plFirstRun:true, language:"", waGain:true, waBuf:true },
   bt:{ active:false, label:"" },   // label setzt refreshBtInfo() übersetzt
 };
 
@@ -1128,14 +1128,23 @@ async function playItem(qItem, plId){
     t.dur = audio.duration; idbPut("tracks", t);
   }
   try{ audio.currentTime = clamp(from, 0, audio.duration); }catch(e){}
+  /* iOS: Titel als Audio-Puffer bereitlegen, das Element wird stummer Taktgeber.
+     Schlaegt die Dekodierung fehl, bleibt der bisherige Pfad (Element hoerbar) erhalten. */
+  bufOn = false;
+  if (bufWanted() && waOn){
+    if (await ensureBuf(it.trackId)) bufOn = true; else toast(T("toast.wa_buf_failed"), true);
+  } else stopBuf();
+  audio.muted = bufOn;
   cutEndGuard = false; // manueller Trackwechsel waehrend eines laufenden Uebergangs
   setRamp(state.settings.fade > 0 ? 0 : 1); // Fade-In beginnt bei 0, kein Klick an der Kante
   try{ await audio.play(); }
   catch(e){ // Autoplay-Sperre o. A.: nicht mit stummer Wiedergabe/0 % Volume enden
     state.player.playing = false; stopFadeIn(); stopFadeOut(true);
+    if (bufOn){ audio.muted = false; bufOn = false; stopBuf(); }
     renderMini(); refreshCurrent(); return;
   }
   state.player.playing = true;
+  if (bufOn) startBuf(audio.currentTime);
   if (t.dur !== audio.duration && isFinite(audio.duration) && audio.duration > 0){
     t.dur = audio.duration; idbPut("tracks", t);
   }
@@ -1148,7 +1157,7 @@ async function playItem(qItem, plId){
   if (state.settings.fade > 0) fadeIn(); else refreshMaster();
   /* Selbstdiagnose: gewuenschter Gain-Pfad kam nicht hoch – dann sind Blendung und
      Regler wirkungslos, also einmal sichtbar melden statt still zu scheitern. */
-  if (waRouteWanted() && !waOn){
+  if (waRouteWanted() && (!waOn || (bufOn && !bufSrc))){
     setTimeout(() => {
       if (waRouteWanted() && !waOn && state.player.playing && !waWarned){
         waWarned = true; toast(T("toast.no_wa"), true);
@@ -1279,6 +1288,8 @@ function probeVolumeSettable(){
   }catch(e){ return false; }
 }
 function waStateKey(){
+  if (waOn && bufOn) return "set.wa_state_buf";
+  if (waOn && bufFail) return "set.wa_state_buf_failed";
   if (waOn) return "set.wa_state_on";
   if (state.settings.waGain === false) return "set.wa_state_off";
   if (waApiMissing) return "set.wa_state_failed";
@@ -1289,7 +1300,17 @@ function waStateKey(){
    anbinden. Ein MediaElementSource an einem suspendierten Kontext würde das Element
    stumm schalten, ohne dass man es zuruecknehmen koennte. */
 async function ensureWaRoute(){
-  if (waOn || waApiMissing || !waRouteWanted()) return waOn;
+  if (waOn){
+    /* Puffer-Wiedergabe war an, das Element wurde nie angebunden. Wurde sie
+       ausgeschaltet, holen die Nachbindung nach (Gestaender waere sonst wirkungslos). */
+    if (!waSrc && !bufWanted() && waCtx && waCtx.state === "running"){
+      try{ waSrc = waCtx.createMediaElementSource(audio); waSrc.connect(waNode); }
+      catch(e){ console.warn("Nachbindung fehlgeschlagen:", e && e.message); }
+      if (waSrc && bufOn){ bufOn = false; audio.muted = false; stopBuf(); }  // Puffer zuvor war an
+    }
+    return waOn;
+  }
+  if (waApiMissing || !waRouteWanted()) return waOn;
   try{
     const AC = window.AudioContext || window.webkitAudioContext;
     if (!AC) { waApiMissing = true; return false; }
@@ -1311,8 +1332,13 @@ async function ensureWaRoute(){
     if (waCtx.state !== "running") return false;
     waNode = waCtx.createGain();
     waNode.gain.value = clamp(state.settings.volume, 0, 1) * rampGain;
-    waSrc = attach();
-    waSrc.connect(waNode); waNode.connect(waCtx.destination);
+    /* Puffer-Wiedergabe (iOS): das Element wird NICHT angebunden – es bleibt stummer
+       Taktgeber, der Klang kommt aus dem AudioBuffer und damit sicher am GainNode vorbei. */
+    if (!bufWanted()){
+      if (!attach) { waApiMissing = true; return false; }
+      waSrc = attach(); waSrc.connect(waNode);
+    }
+    waNode.connect(waCtx.destination);
     waOn = true;
     patchVolumeForWa();
     waCtx.addEventListener("statechange", resumeWa);
@@ -1339,6 +1365,71 @@ function patchVolumeForWa(){
       set(v){ waBase = clamp(+v || 0, 0, 1); d.set.call(audio, waOn ? 1 : waBase); },
     });
   }catch(e){ console.warn("Lautstaerke-Zugriff nicht erweiterbar:", e); }
+}
+/* ── Puffer-Wiedergabe (iOS) ──────────────────────────────────────────────────
+  iphoneBerichten: Bruecke ist "aktiv", aber weder Regler noch Blendung sind hoerbar
+   – WKWebView spielt das Media-Element also am GainNode vorbei. Deshalb wird das
+   Element auf iOS zum reinen Taktgeber (muted) und die Hoerbarkeit kommt aus einem
+   per decodeAudioData gewonnenen AudioBuffer, der dasselbe GainNode durchlaeuft.
+   Saemtliche Positions-, Schnitt- und Loop-Logik bleibt unveraendert am Element. */
+let bufCache = new Map(), bufSrc = 0, bufStartCtx = 0, bufStartPos = 0, bufOn = false, bufFail = false;
+const bufWanted = () => waRouteWanted() && state.settings.waBuf !== false && IS_IOS();
+
+async function ensureBuf(trackId){
+  bufFail = false; stopBuf();
+  if (!bufWanted() || !waOn || !trackId) return false;
+  try{
+    let buf = bufCache.get(trackId);
+    if (!buf){
+      const rec = await new Promise(res => {
+        const rq = idb.transaction("blobs","readonly").objectStore("blobs").get(trackId);
+        rq.onsuccess = () => res(rq.result); rq.onerror = () => res(null);
+      });
+      if (!rec || !rec.blob) throw new Error("Datei nicht mehr im Speicher");
+      buf = await waCtx.decodeAudioData(await rec.blob.arrayBuffer());
+      if (buf.duration > 20*60) throw new Error("Titel zu lang fuer den Puffer");
+      bufCache.clear();   // immer genau den gerade genutzten Titel halten (Speicher)
+      bufCache.set(trackId, buf);
+      console.log("Puffer bereit: " + buf.duration.toFixed(1) + "s, " + buf.numberOfChannels + " Kanal(e)");
+    }
+    return true;
+  }catch(e){
+    bufFail = true; console.warn("Puffer-Wiedergabe nicht moeglich:", e && e.message);
+    return false;
+  }
+}
+function startBuf(pos){
+  const buf = bufCache.get(state.player.trackId);
+  if (!buf || !waOn || !waCtx || waCtx.state !== "running") return;
+  stopBuf();
+  const n = waCtx.createBufferSource();
+  n.buffer = buf; n.connect(waNode);
+  n.onended = () => { if (bufSrc === n) bufSrc = 0; };
+  const t0 = waCtx.currentTime + 0.02;
+  const from = clamp(pos + (t0 - waCtx.currentTime), 0, Math.max(0, buf.duration - 0.02));
+  n.start(t0, from);
+  bufSrc = n; bufStartCtx = t0; bufStartPos = from;
+}
+function stopBuf(){
+  if (!bufSrc) return;
+  const n = bufSrc; bufSrc = 0;
+  try{ n.onended = null; n.stop(); }catch(e){}
+}
+const bufPos = () => bufSrc ? bufStartPos + (waCtx.currentTime - bufStartCtx) : -1;
+/* Das Element fuehrt die Zeit, der Puffer muss hoeren: nach seek/pause/play oder
+   bei Abweichung neu ansetzen. Kleine Drift wird hoerfrei ueber die Wiedergaberate
+   ausgeglichen, grosse versetzt den Puffer direkt. */
+function syncBuf(){
+  if (!bufOn) return;
+  if (!waCtx || waCtx.state !== "running"){ stopBuf(); resumeWa(); return; }
+  if (audio.paused || audio.seeking){ stopBuf(); return; }
+  if (!bufSrc){ startBuf(audio.currentTime); return; }
+  const drift = bufPos() - audio.currentTime;
+  if (Math.abs(drift) > 1.5){ startBuf(audio.currentTime); return; }
+  if (bufSrc.playbackRate && Math.abs(drift) > 0.05){
+    const want = clamp(1 - drift/Math.max(1, audio.duration || 1)*0.5, 0.97, 1.03);
+    if (Math.abs(bufSrc.playbackRate.value - want) > 0.002) bufSrc.playbackRate.value = want;
+  }
 }
 function armWaGesture(){
   if (!IS_IOS()) return;
@@ -1426,6 +1517,7 @@ let lastPos = -1, lastAdvance = 0, stalledNotified = false;
 function loop(){
   if (state.player.playing && !audio.paused){
     resumeWa();
+    syncBuf();
     const s = span();
     if (s){
       const d = effFade(s);
@@ -1460,6 +1552,7 @@ function loop(){
 audio.addEventListener("timeupdate", () => {
   resumeWa();
   driveRamps();
+  syncBuf();
   const s = span(); if (!s) return;
   // Hintergrund: rAF ruht, also Blendung hier ebenfalls anstossen/nachziehen.
   const d = effFade(s);
@@ -1469,11 +1562,13 @@ audio.addEventListener("timeupdate", () => {
 });
 audio.addEventListener("ended", () => onCutEnd());
 audio.addEventListener("pause", () => {
+  stopBuf();
   stopFadeOut(true); stopFadeIn(); // Pause in der Fade-Zone: Volume restaurieren, loop fadelt bei Bedarf neu
   if (state.player.playing){ state.player.playing = false; renderMini(); refreshCurrent(); }
   syncCutPlayBtn();
 });
-audio.addEventListener("play",  () => { if (!state.player.playing){ state.player.playing = true; renderMini(); refreshCurrent(); } syncCutPlayBtn(); });
+audio.addEventListener("play",  () => { if (!state.player.playing){ state.player.playing = true; renderMini(); refreshCurrent(); } if (bufOn) startBuf(audio.currentTime); syncCutPlayBtn(); });
+audio.addEventListener("seeked", () => { if (bufOn && !audio.paused) startBuf(audio.currentTime); });
 
 audio.addEventListener("error", () => {
   if (!audio.error) return;   // src entfernt = kein Fehler
@@ -1954,8 +2049,10 @@ function renderSet(){
     (IS_IOS() ?
     '<div class="sep"></div>' +
     '<div class="kv"><span class="k">' + T("set.wa_gain") + '</span><div class="toggle ' + (s.waGain !== false?"on":"") + '" data-act="tgl" data-k="waGain"></div></div>' +
+    '<div class="kv"><span class="k">' + T("set.wa_buf") + '</span><div class="toggle ' + (s.waBuf !== false?"on":"") + '" data-act="tgl" data-k="waBuf"></div></div>' +
     '<div class="kv"><span class="k">' + T("set.wa_state") + '</span><span class="v">' + T(waStateKey()) + '</span></div>' +
-    '<div class="infoBlock">' + T("set.wa_gain_hint") + '</div>' : "") +
+    '<div class="infoBlock">' + T("set.wa_gain_hint") + '</div>' +
+    '<div class="infoBlock">' + T("set.wa_buf_hint") + '</div>' : "") +
     '<div class="sep"></div>' +
     '<div class="kv"><span class="k">' + T("set.sleep") + '</span><span class="v">' +
     '<button class="btn small" data-act="sleep">' + (s.sleepMin ? T("common.minutes", { n:s.sleepMin }) : T("common.off")) + '</button></span></div>' +
@@ -2592,7 +2689,7 @@ async function handle(act, el){
       if (!confirm(T("confirm.delete_track"))) { closeSheet(); break; }
       state.playlists.forEach(p => p.items = p.items.filter(i => i.trackId !== ds.t));
       await Promise.all(state.playlists.map(savePlaylist));
-      await idbDel("tracks", ds.t); await idbDel("blobs", ds.t);
+      await idbDel("tracks", ds.t); await idbDel("blobs", ds.t); bufCache.delete(ds.t);
       if (urlCache.has(ds.t)){ URL.revokeObjectURL(urlCache.get(ds.t)); urlCache.delete(ds.t); }
       if (state.player.trackId === ds.t){ audio.pause(); audio.removeAttribute("src");
         state.player.trackId = null; state.player.playing = false; }
@@ -2606,9 +2703,11 @@ async function handle(act, el){
         if (dirty) await savePlaylist(p); }
       toast(T("toast.cuts_deleted", { n })); refreshCurrent(); renderMini(); break; }
     case "tgl": {
-      // waGain gilt auch ohne gespeicherten Wert als "Ein" – deshalb wirksam negieren.
-      const on = ds.k === "waGain" ? state.settings[ds.k] !== false : !!state.settings[ds.k];
+      // waGain/waBuf gelten auch ohne gespeicherten Wert als "Ein" – deshalb wirksam negieren.
+      const defOn = ds.k === "waGain" || ds.k === "waBuf";
+      const on = defOn ? state.settings[ds.k] !== false : !!state.settings[ds.k];
       state.settings[ds.k] = !on;
+      if (bufOn && ds.k === "waBuf"){ bufOn = false; audio.muted = false; stopBuf(); }
       if (ds.k === "waGain") toast(T("toast.wa_restart"), true);
       saveSettings(); renderSet(); refreshMaster(); break; }
     case "fade-up": case "fade-down": {

@@ -72,7 +72,7 @@ Mac-App **Transporter** zum Hochladen verwenden.
 
 **Version/Build** kommen aus `ios/App/App.xcodeproj` (`MARKETING_VERSION`,
 `CURRENT_PROJECT_VERSION`) und halten zu `app/app.js` (`APP_VER`/`APP_BUILD`) und
-`android/app/build.gradle` (aktuell **1.3.3**, Build **13**). App Store Connect weist einen
+`android/app/build.gradle` (aktuell **1.3.4**, Build **14**). App Store Connect weist einen
 Upload ab, wenn die Build-Nummer innerhalb derselben Version schon vergeben ist – dann
 `CURRENT_PROJECT_VERSION` erhöhen und neu archivieren. Beim ersten Upload fragt
 App Store Connect nach der **Export Compliance**; die App nutzt nur Standard-TLS, die
@@ -180,6 +180,19 @@ Auch Now-Playing-Seeking und die Headset-Tasten stoppen bzw. springen innerhalb 
   *wartet auf Wiedergabe*, *nicht verfügbar* oder *ausgeschaltet*. Wenn der Pfad gewünscht,
   aber nicht aktiv ist, meldet die App das einmalig per Toast („Lautstärkebrücke nicht
   aktiv …“) – dann wirken Blendung und Regler nämlich nachweislich nicht.
+- **Puffer-Wiedergabe (iOS, Standard: Ein).** Build 13 zeigte: Die Brücke kann „aktiv“
+  sein und ist trotzdem **nicht hörbar** – WKWebView spielt das Media-Element am GainNode
+  vorbei. Deshalb ist die Brücke auf iOS jetzt zweistufig: Der Titel wird zusätzlich mit
+  `decodeAudioData` als AudioBuffer geladen und **aus dem Puffer** abgespielt (BufferSource
+  → GainNode), während das Media-Element nur noch stummer Taktgeber ist (`audio.muted`).
+  Damit hängen Lautstärke **und** Blendung zwingend im Hörpfad. Positions-, Schnitt-,
+  Loop- und Schlaf-Timer-Logik bleiben unverändert am Media-Element; der Puffer folgt dem
+  Element und gleicht kleine Abweichungen über die Wiedergaberate aus, bei großen Sprüngen
+  (Suche, Titelwechsel) setzt er neu an. Es wird immer genau **ein** Puffer gehalten
+  (Speicher), sehr lange Titel (> 20 min) und fehlgeschlagene Dekodierung fallen auf den
+  Element-Pfad zurück – sichtbar als Status „Puffer fehlt“ plus Toast.
+  Abschaltbar in den **Einstellungen → „Wiedergabe über Audio-Puffer (iOS)“**; wirkt ab dem
+  nächsten Titelstart. Fällt der Ton bei gesperrtem Bildschirm aus, hier ausschalten.
 
 ---
 
@@ -199,7 +212,13 @@ Auch Now-Playing-Seeking und die Headset-Tasten stoppen bzw. springen innerhalb 
 ### Fehlerbehebung
 - **Lautstärke-Regler ohne Effekt / Blendung („Ausblenden an Schnittkante“) bleibt hart**:
   zuerst in den Einstellungen die Zeile **„Lautstärkebrücke“** ablesen.
-  - *aktiv* → die Brücke läuft; dann liegt es nicht an `audio.volume` (Fall melden).
+  - *aktiv – Titel als Audio-Puffer* → **Soll-Zustand**: Klang kommt aus dem Puffer,
+    Regler und Blendung liegen garantiert im Hörpfad.
+  - *aktiv* (ohne Zusatz) → das Element läuft über die Graph-Kette; auf iOS war das nachweislich
+    **nicht hörbar wirksam**. Schalter „Wiedergabe über Audio-Puffer (iOS)“ prüfen und App
+    neu starten.
+  - *aktiv – Puffer fehlt, Titel läuft direkt* → Dekodierung fehlgeschlagen (Toast), Blendung
+    wirkt in diesem Fall nicht; Titel erneut starten.
   - *wartet auf Wiedergabe* → einen Titel starten, die Brücke geht beim ersten Start an.
   - *nicht verfügbar* → Web Audio ist in dieser WebView abgeschaltet; App neu starten.
   - *ausgeschaltet* → Schalter „Lautstärke über Web Audio (iOS)“ auf **Ein** und App neu starten.
