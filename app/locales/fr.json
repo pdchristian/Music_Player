@@ -339,6 +339,7 @@
   "toast.storage_blocked": "Stockage indisponible – import impossible",
   "toast.storage_short": "Stockage indisponible",
   "toast.wa_buf_failed": "Tampon audio impossible – le fondu repasse par le chemin direct",
+  "toast.wa_buf_silent": "Aucun son depuis la mémoire audio – la lecture repart en direct",
   "toast.wa_restart": "Pont de volume : redémarre l'app pour l'appliquer",
   "track.add_other_pl": "＋ Autres playlists",
   "track.cut_remove": "⊘ Retirer la coupe (tout lire)",

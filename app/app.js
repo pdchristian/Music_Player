@@ -14,7 +14,7 @@
    (BeatClipMedia.appInfo) – die Konstanten dienen nur als Fallback (PWA, iOS ohne
    Plugin-Antwort) und sollten mit android/app/build.gradle bzw. ios/…/project.pbxproj
    mitlaufen. */
-let APP_VER = "1.3.5", APP_BUILD = 15;
+let APP_VER = "1.3.6", APP_BUILD = 16;
 
 /* ─────────────────────────── Utils ───────────────────────────────────── */
 const $  = s => document.querySelector(s);
@@ -1128,24 +1128,25 @@ async function playItem(qItem, plId){
     t.dur = audio.duration; idbPut("tracks", t);
   }
   try{ audio.currentTime = clamp(from, 0, audio.duration); }catch(e){}
-  /* iOS: Titel als Audio-Puffer bereitlegen, das Element wird stummer Taktgeber.
-     Schlaegt die Dekodierung fehl, bleibt der bisherige Pfad (Element hoerbar) erhalten. */
-  bufOn = false;
+  /* iOS: Titel als Audio-Puffer bereitlegen; das Element wird erst stummer
+     Taktgeber, wenn der Puffer wirklich klingt. So bleibt der Titel auch dann
+     hoerbar, wenn Web Audio (noch) nicht hochfaehrt – Dekodierung laeuft parallel
+     zur Wiedergabe und uebernimmt, sobald sie fertig ist. */
+  bufOn = false; bufFail = false;
+  let bufPr = null;
   if (bufSrc && bufSrc.trackId !== it.trackId) stopBuf();  // alter Titel darf nicht weiterklingen
-  if (bufWanted() && waOn){
-    if (await ensureBuf(it.trackId)) bufOn = true; else toast(T("toast.wa_buf_failed"), true);
-  } else stopBuf();
-  audio.muted = bufOn;
+  if (bufWanted() && waOn) bufPr = ensureBuf(it.trackId); else stopBuf();
+  audio.muted = false;
   cutEndGuard = false; // manueller Trackwechsel waehrend eines laufenden Uebergangs
   setRamp(state.settings.fade > 0 ? 0 : 1); // Fade-In beginnt bei 0, kein Klick an der Kante
   try{ await audio.play(); }
   catch(e){ // Autoplay-Sperre o. A.: nicht mit stummer Wiedergabe/0 % Volume enden
     state.player.playing = false; stopFadeIn(); stopFadeOut(true);
-    if (bufOn){ audio.muted = false; bufOn = false; stopBuf(); }
+    audio.muted = false; bufOn = false; stopBuf();
     renderMini(); refreshCurrent(); return;
   }
   state.player.playing = true;
-  if (bufOn) startBuf(audio.currentTime);
+  if (bufPr) bufPr.then(ok => adoptBuffer(ok, it.trackId));
   if (t.dur !== audio.duration && isFinite(audio.duration) && audio.duration > 0){
     t.dur = audio.duration; idbPut("tracks", t);
   }
@@ -1158,7 +1159,7 @@ async function playItem(qItem, plId){
   if (state.settings.fade > 0) fadeIn(); else refreshMaster();
   /* Selbstdiagnose: gewuenschter Gain-Pfad kam nicht hoch – dann sind Blendung und
      Regler wirkungslos, also einmal sichtbar melden statt still zu scheitern. */
-  if (waRouteWanted() && (!waOn || (bufOn && !bufSrc))){
+  if (waRouteWanted() && !waOn){
     setTimeout(() => {
       if (waRouteWanted() && !waOn && state.player.playing && !waWarned){
         waWarned = true; toast(T("toast.no_wa"), true);
@@ -1167,6 +1168,26 @@ async function playItem(qItem, plId){
     }, 1200);
   }
   renderMini(); refreshCurrent();
+}
+function adoptBuffer(ok, trackId){
+  /* Puffer steht bereit: erst jetzt wird das Element zum stummen Taktgeber.
+     Klaengte der Puffer nicht, bleibt der direkte Weg – hoerbar ist Pflicht. */
+  if (!ok){ bufMissing(trackId); return; }
+  if (!state.player.playing || state.player.trackId !== trackId) return;
+  if (!waOn || state.settings.waBuf === false || !waRunning()) return;
+  /* Uebernahme ist auch mitten in einer Rampe sicher: Lautstaerke und Blendung sitzen
+     am Master-Gain, der Puffer haengt daran und spielt nahtlos auf demselben Pegel. */
+  audio.muted = true;
+  if (startBuf(audio.currentTime)){ bufOn = true; silWin = performance.now(); return; }
+  audio.muted = false; bufMissing(trackId);
+}
+function bufMissing(trackId){
+  if (bufFail || state.player.trackId !== trackId) return;
+  if (!bufWanted() || !waOn) return;   // bewusst abgeschaltet – gibt nichts zu melden
+  bufFail = true;
+  console.warn("Audio-Puffer nicht bereit – Titel laeuft direkt");
+  toast(T("toast.wa_buf_silent"), true);
+  if (state.screen === "set") renderSet();
 }
 function armEndWatchdog(){
   clearTimeout(endWatchdog);
@@ -1289,6 +1310,13 @@ function probeVolumeSettable(){
     return waVolumeFixed;
   }catch(e){ return false; }
 }
+/* Haelt iOS ein Versprechen unbegrenzt zurueck, gilt es nach ms als fehlgeschlagen:
+   resume() und decodeAudioData laufen an einem angehaltenen Kontext einfach ewig
+   weiter – ohne Frist bliebe die Wiedergabe nach der Installation komplett stumm. */
+function withTimeout(p, ms){
+  return Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error("Zeitlimit " + ms + " ms")), ms))]);
+}
+const waRunning = () => !!(waCtx && waCtx.state === "running");
 function waStateKey(){
   if (waOn && bufOn) return "set.wa_state_buf";
   if (waOn && bufFail) return "set.wa_state_buf_failed";
@@ -1303,6 +1331,9 @@ function waStateKey(){
    stumm schalten, ohne dass man es zuruecknehmen koennte. */
 async function ensureWaRoute(){
   if (waOn){
+    /* Kontext kann zwischendurch eingefroren sein (Sperrbildschirm, Anruf) – ohne
+       erneuten Anstoss bliebe die Puffer-Wiedergabe stumm. */
+    if (waCtx && !waRunning()){ try{ waCtx.resume().catch(() => {}); }catch(e){} }
     /* Puffer-Wiedergabe war an, das Element wurde nie angebunden. Wurde sie
        ausgeschaltet, holen die Nachbindung nach (Gestaender waere sonst wirkungslos). */
     if (!waSrc && !bufWanted() && waCtx && waCtx.state === "running"){
@@ -1323,10 +1354,12 @@ async function ensureWaRoute(){
       : (audio.createMediaElementSource ? () => audio.createMediaElementSource(waCtx) : null);
     if (!attach) { waApiMissing = true; return false; }
     if (waCtx.state !== "running"){
-      try{ await waCtx.resume(); }
+      try{ await withTimeout(waCtx.resume(), 900); }
       catch(e){
-        // Safari wirft hier, wenn der Kontext auesserhalb einer Geste angelegt wurde –
-        // dann beim naechsten Antippen erneut versuchen (armWaGesture haengt daran).
+        // Safari wirft bzw. haelt resume() auf, wenn der Kontext ausserhalb einer
+        // Geste angelegt wurde – dann beim naechsten Antippen erneut versuchen
+        // (armWaGesture haengt daran). Die Wiedergabe laeuft bis dahin weiter, statt
+        // in einem nie erfuellten resume() haengen zu bleiben.
         console.warn("AudioContext-Start verschoben:", e && e.message);
         return false;
       }
@@ -1340,8 +1373,20 @@ async function ensureWaRoute(){
       if (!attach) { waApiMissing = true; return false; }
       waSrc = attach(); waSrc.connect(waNode);
     }
-    waNode.connect(waCtx.destination);
+    /* Immer ueber einen Analyser ans Ziel: er hoert mit, was wirklich herauskommt.
+       So laesst sich erkennen, dass der Puffer laeuft, aber nichts zu hoeren ist. */
+    bufAn = waCtx.createAnalyser(); bufAn.fftSize = 1024;
+    bufAnBuf = new Float32Array(bufAn.fftSize);
+    waNode.connect(bufAn); bufAn.connect(waCtx.destination);
     waOn = true;
+    /* iOS-wecken: ein einziger Stumm-Frame, direkt nach dem Hochfahren gestartet,
+       bringt die Web-Audio-Ausgabe wirklich zum Laufen. Ohne diesen Anstoss bleibt
+       der erste echte Ton nach einer frischen Installation schon mal hoerlos. */
+    try{
+      const sil = waCtx.createBuffer(1, 1, waCtx.sampleRate);
+      const kick = waCtx.createBufferSource(); kick.buffer = sil;
+      kick.connect(waCtx.destination); kick.start(0);
+    }catch(e){}
     patchVolumeForWa();
     waCtx.addEventListener("statechange", resumeWa);
     console.log("Web-Audio-Gain aktiv (state " + waCtx.state + ")");
@@ -1375,11 +1420,16 @@ function patchVolumeForWa(){
    per decodeAudioData gewonnenen AudioBuffer, der dasselbe GainNode durchlaeuft.
    Saemtliche Positions-, Schnitt- und Loop-Logik bleibt unveraendert am Element. */
 let bufCache = new Map(), bufSrc = 0, bufOn = false, bufFail = false;
+let bufAn = 0, bufAnBuf = null, silT = 0, silWin = 0;
 const bufWanted = () => waRouteWanted() && state.settings.waBuf !== false && IS_IOS();
 
 async function ensureBuf(trackId){
   bufFail = false; stopBuf();
   if (!bufWanted() || !waOn || !trackId) return false;
+  /* Dekodierung laeuft auf dem Audio-Thread: an einem angehaltenen Kontext antwortet
+     iOS niemals. Deshalb nur im laufenden Kontext versuchen – sonst geht der Titel
+     auf dem Element-Pfad hoerbar los, statt in der Dekodierung zu versanden. */
+  if (!waRunning()){ bufFail = true; console.warn("Puffer uebersprungen: Audio-Kontext laeuft nicht"); return false; }
   try{
     let buf = bufCache.get(trackId);
     if (!buf){
@@ -1388,7 +1438,7 @@ async function ensureBuf(trackId){
         rq.onsuccess = () => res(rq.result); rq.onerror = () => res(null);
       });
       if (!rec || !rec.blob) throw new Error("Datei nicht mehr im Speicher");
-      buf = await waCtx.decodeAudioData(await rec.blob.arrayBuffer());
+      buf = await withTimeout(waCtx.decodeAudioData(await rec.blob.arrayBuffer()), 12000);
       if (buf.duration > 20*60) throw new Error("Titel zu lang fuer den Puffer");
       bufCache.clear();   // immer genau den gerade genutzten Titel halten (Speicher)
       bufCache.set(trackId, buf);
@@ -1404,12 +1454,12 @@ async function ensureBuf(trackId){
    auf einer Kurve ansetzt oder abgeschnitten wird, knallt sonst deutlich hoerbar. */
 function startBuf(pos){
   const buf = bufCache.get(state.player.trackId);
-  if (!buf || !waOn || !waCtx || waCtx.state !== "running") return;
+  if (!buf || !waOn || !waRunning()) return false;
   /* seeked + loop() koennen denselben Anstoss doppelt liefern – dann wuerde die
      gerade erst gestartete Quelle sofort wieder aus- und neu eingeblendet (Loechen).
      Nur fuer dieselbe Quelle gelten lassen, sonst spielt ein Titelwechsel den alten
      Puffer weiter. */
-  if (bufSrc && bufSrc.buf === buf && Math.abs(bufPos() - pos) < 0.05) return;
+  if (bufSrc && bufSrc.buf === buf && Math.abs(bufPos() - pos) < 0.05) return true;
   fadeOutBuf(0.008);
   const gate = waCtx.createGain(); gate.gain.value = 0; gate.connect(waNode);
   const node = waCtx.createBufferSource(); node.buffer = buf; node.connect(gate);
@@ -1420,6 +1470,7 @@ function startBuf(pos){
   const from = clamp(pos + (t0 - waCtx.currentTime), 0, Math.max(0, buf.duration - 0.02));
   node.start(t0, from);
   bufSrc = { node, gate, t0, from, buf, trackId: state.player.trackId };
+  return true;
 }
 /* Ausblenden statt abschneiden – kurz genug, um eine Pause noch direkt wirken zu
    lassen, aber lang genug, damit es nicht hoerbar abwaergt. */
@@ -1453,6 +1504,46 @@ function syncBuf(){
     const want = clamp(1 - drift/Math.max(1, audio.duration || 1)*0.5, 0.97, 1.03);
     if (Math.abs(rate.value - want) > 0.002) rate.value = want;
   }
+}
+/* Nie stumm zuruecklassen: Puffer-Wiedergabe ist gewaehlt, aber es klingt nichts
+   (Kontext laeuft nicht, Quelle startet nicht) – nach 1,5 s zurueck auf den direkten
+   Element-Pfad, der ist hoerbar; Blendung faellt bis zum naechsten Titelstart aus. */
+let bufArmT = 0;
+function bufDirect(reason){
+  if (!bufOn) return;
+  bufOn = false; bufFail = true; audio.muted = false; stopBuf();
+  console.warn(reason + " – Wiedergabe laeuft wieder direkt");
+  toast(T("toast.wa_buf_silent"), true);
+  if (state.screen === "set") renderSet();
+}
+function bufWatch(){
+  if (!state.player.playing || audio.paused) return;
+  if (!bufOn){ bufArmT = 0; if (audio.muted && !bufSrc) audio.muted = false; return; }
+  if (!bufSrc){
+    if (!waRunning()) resumeWa();
+    if (!bufArmT){ bufArmT = performance.now(); return; }
+    if (performance.now() - bufArmT < 1500) return;
+    bufArmT = 0; bufDirect("Puffer-Quelle blieb aus");
+    return;
+  }
+  /* Quelle laeuft, am Ausgang kommt aber nichts an – iOS fährt die Web-Audio-Ausgabe
+     nach einer frischen Installation schon mal nicht hoch. Gleich nach dem ersten
+     Uebernehmen wird deshalb dem Ausgang zugehoert: bleibt er bei voller Rampe
+     nachweislich digital still, zurueck auf den hoerbaren Element-Pfad. */
+  bufArmT = 0;
+  const ramping = rampGain < 0.9 || state.settings.volume < 0.3;
+  if (!bufAn || !bufAnBuf || rampOut || ramping){
+    if (silWin && ramping && !rampOut) silWin = performance.now();   // Fenster waehrend der Rampe offen halten
+    silT = 0; return;
+  }
+  if (!silWin || performance.now() - silWin > 5000){ silWin = 0; silT = 0; return; }
+  bufAn.getFloatTimeDomainData(bufAnBuf);
+  let peak = 0;
+  for (let i = 0; i < bufAnBuf.length; i++){ const a = Math.abs(bufAnBuf[i]); if (a > peak) peak = a; }
+  if (peak > 0.0001){ silWin = 0; silT = 0; return; }   // Ton ist da – Pruefung beendet
+  if (!silT){ silT = performance.now(); return; }
+  if (performance.now() - silT < 1500) return;
+  silT = 0; silWin = 0; bufDirect("Puffer laeuft, aber am Ausgang ist Stille");
 }
 function armWaGesture(){
   if (!IS_IOS()) return;
@@ -1547,6 +1638,7 @@ function loop(){
   if (state.player.playing && !audio.paused){
     resumeWa();
     syncBuf();
+    bufWatch();
     const s = span();
     if (s){
       const d = effFade(s);
@@ -1582,6 +1674,7 @@ audio.addEventListener("timeupdate", () => {
   resumeWa();
   driveRamps();
   syncBuf();
+  bufWatch();
   const s = span(); if (!s) return;
   // Hintergrund: rAF ruht, also Blendung hier ebenfalls anstossen/nachziehen.
   const d = effFade(s);

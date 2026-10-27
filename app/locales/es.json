@@ -339,6 +339,7 @@
   "toast.storage_blocked": "Almacenamiento no disponible: importación imposible",
   "toast.storage_short": "Almacenamiento no disponible",
   "toast.wa_buf_failed": "No se pudo crear el búfer de audio – el fundido vuelve al camino directo",
+  "toast.wa_buf_silent": "Sin sonido desde el búfer de audio: la reproducción vuelve a la vía directa",
   "toast.wa_restart": "Puente de volumen: reinicia la app para aplicarlo",
   "track.add_other_pl": "＋ Otras listas",
   "track.cut_remove": "⊘ Quitar recorte (reproducir todo)",

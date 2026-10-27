@@ -72,7 +72,7 @@ Mac-App **Transporter** zum Hochladen verwenden.
 
 **Version/Build** kommen aus `ios/App/App.xcodeproj` (`MARKETING_VERSION`,
 `CURRENT_PROJECT_VERSION`) und halten zu `app/app.js` (`APP_VER`/`APP_BUILD`) und
-`android/app/build.gradle` (aktuell **1.3.5**, Build **15**). App Store Connect weist einen
+`android/app/build.gradle` (aktuell **1.3.6**, Build **16**). App Store Connect weist einen
 Upload ab, wenn die Build-Nummer innerhalb derselben Version schon vergeben ist – dann
 `CURRENT_PROJECT_VERSION` erhöhen und neu archivieren. Beim ersten Upload fragt
 App Store Connect nach der **Export Compliance**; die App nutzt nur Standard-TLS, die
@@ -204,6 +204,18 @@ Auch Now-Playing-Seeking und die Headset-Tasten stoppen bzw. springen innerhalb 
   Schwelle 0,02): Loop-Neustart, Pause bei voller Lautstärke, Stopp am Schnitt-Ende, Suche und
   vier Schnellsuchen = **0 Knackser**; eine eingebaute synthetische Referenz (Sprung 0,3) wird
   sicher gefunden.
+- **Stille nach der Installation behoben (Build 16).** Frisch installiert war **nichts zu
+  hören**, bis „Wiedergabe über Audio-Puffer (iOS)“ einmal aus- und wieder eingeschaltet
+  wurde: Das Element war als stummer Taktgeber taubgeschaltet, während der Puffer noch gar
+  nicht klang – Web Audio braucht auf iOS erst einen hörbaren Ton, bevor Ausgabe und
+  `decodeAudioData` wirklich anspringen. Deshalb gilt jetzt: **hörbar ist Pflicht.** Der
+  Titel startet immer auf dem hörbaren Element-Pfad, der Puffer wird parallel dekodiert und
+  übernimmt erst, wenn er nachweislich klingt (`adoptBuffer`). Dazu kommen ein Stumm-Frame zum
+  Wecken der Web-Audio-Ausgabe, Fristen für `resume()` (900 ms) und `decodeAudioData` (12 s –
+  iOS hält diese Versprechen an einem angehaltenen Kontext unbegrenzt zurück) sowie eine
+  Selbstkontrolle: `bufWatch()` hört am Ausgang mit (AnalyserNode) und schaltet spätestens
+  1,5 s nachweislicher Stille zurück auf den Element-Pfad – sichtbar als Toast „Kein Ton aus
+  dem Audio-Puffer …“ und Status „Puffer fehlt, Titel läuft direkt“.
 
 ---
 
@@ -228,8 +240,9 @@ Auch Now-Playing-Seeking und die Headset-Tasten stoppen bzw. springen innerhalb 
   - *aktiv* (ohne Zusatz) → das Element läuft über die Graph-Kette; auf iOS war das nachweislich
     **nicht hörbar wirksam**. Schalter „Wiedergabe über Audio-Puffer (iOS)“ prüfen und App
     neu starten.
-  - *aktiv – Puffer fehlt, Titel läuft direkt* → Dekodierung fehlgeschlagen (Toast), Blendung
-    wirkt in diesem Fall nicht; Titel erneut starten.
+  - *aktiv – Puffer fehlt, Titel läuft direkt* → Dekodierung fehlgeschlagen oder der Puffer
+    blieb stumm (Toast); Blendung wirkt in diesem Fall nicht, der Titel ist aber hörbar.
+    Titel erneut starten.
   - *wartet auf Wiedergabe* → einen Titel starten, die Brücke geht beim ersten Start an.
   - *nicht verfügbar* → Web Audio ist in dieser WebView abgeschaltet; App neu starten.
   - *ausgeschaltet* → Schalter „Lautstärke über Web Audio (iOS)“ auf **Ein** und App neu starten.
@@ -243,6 +256,13 @@ Auch Now-Playing-Seeking und die Headset-Tasten stoppen bzw. springen innerhalb 
   laufen alle Lautstärke-Änderungen weich und der Puffer-Ton wird vor dem Stop ausgeblendet.
   Tritt es trotzdem auf: Version prüfen (⚙️ ganz unten) und ggf. „Wiedergabe über Audio-Puffer
   (iOS)“ ausschalten – dann stammt der Ton wieder direkt vom Media-Element.
+- **Nach frischer Installation gar kein Ton (erst nach dem Aus-/Einschalten des
+  Puffer-Schalters):** war ein Fehler in Build ≤ 15 – das Element wurde stumm geschaltet,
+  obwohl der Audio-Puffer noch nicht klang. Ab Build 16 startet jeder Titel hörbar am
+  Media-Element und übernimmt den Puffer erst, wenn er nachweislich Ton liefert; bleibt der
+  Puffer stumm, meldet die App das per Toast und spielt direkt weiter. Sollte ein Titel
+  wider Erwarten trotzdem stumm bleiben: ⚙️ → „Wiedergabe über Audio-Puffer (iOS)“ auf
+  **Aus**, App schließen und neu öffnen.
 - Spielt die App bei gesperrtem Bildschirm **gar nicht** oder bricht sie dort hart ab
   (iOS hat das Web-Audio-Rendering abgewählt): Schalter auf **Aus** und App neu starten –
   dann läuft wieder der reine `audio`-Pfad (ohne Blendung, aber ohne Hintergrundrisiko).

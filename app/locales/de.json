@@ -339,6 +339,7 @@
   "toast.storage_blocked": "Speicher nicht verfügbar – Import unmöglich",
   "toast.storage_short": "Speicher nicht verfügbar",
   "toast.wa_buf_failed": "Audio-Puffer konnte nicht erstellt werden – Blendung nutzt wieder den direkten Weg",
+  "toast.wa_buf_silent": "Kein Ton aus dem Audio-Puffer – Wiedergabe läuft wieder direkt am Titel",
   "toast.wa_restart": "Änderung wirkt erst nach einem Neustart der App",
   "track.add_other_pl": "＋ Andere Playlists",
   "track.cut_remove": "⊘ Schnitt entfernen (ganz abspielen)",

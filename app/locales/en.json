@@ -339,6 +339,7 @@
   "toast.storage_blocked": "Storage unavailable – import impossible",
   "toast.storage_short": "Storage unavailable",
   "toast.wa_buf_failed": "Could not create the audio buffer – the fade falls back to the direct path",
+  "toast.wa_buf_silent": "No sound from the audio buffer – playback is back on the direct path",
   "toast.wa_restart": "Volume bridge: restart the app to apply it",
   "track.add_other_pl": "＋ Other playlists",
   "track.cut_remove": "⊘ Remove cut (play whole)",
