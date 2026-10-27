@@ -72,7 +72,7 @@ Mac-App **Transporter** zum Hochladen verwenden.
 
 **Version/Build** kommen aus `ios/App/App.xcodeproj` (`MARKETING_VERSION`,
 `CURRENT_PROJECT_VERSION`) und halten zu `app/app.js` (`APP_VER`/`APP_BUILD`) und
-`android/app/build.gradle` (aktuell **1.3.6**, Build **16**). App Store Connect weist einen
+`android/app/build.gradle` (aktuell **1.3.7**, Build **17**). App Store Connect weist einen
 Upload ab, wenn die Build-Nummer innerhalb derselben Version schon vergeben ist – dann
 `CURRENT_PROJECT_VERSION` erhöhen und neu archivieren. Beim ersten Upload fragt
 App Store Connect nach der **Export Compliance**; die App nutzt nur Standard-TLS, die
@@ -149,6 +149,11 @@ Alle Dateien liegen lokal im App-Sandbox (IndexedDB); keine Uploads, kein Konto.
 ### Schnitt (Start/Ende) unverändert
 Wie gehabt: Playlist → Titel → *Schnitt* → Griffe **S**/**E** auf der Waveform.
 Auch Now-Playing-Seeking und die Headset-Tasten stoppen bzw. springen innerhalb des Schnitts.
+- **⏭ direkt am Schnitt-Ende (seit Build 17):** Steht die Wiedergabe angehalten am
+  Schnitt-Ende, führt **ein** Druck auf ⏭ zum nächsten Titel. Bisher sprang der erste
+  Druck nur zum Schnittanfang zurück – der nächste Titel war erst nach dem zweiten Druck
+  erreichbar. Das Zurückspringen zum Schnittanfang bleibt nur erhalten, solange die
+  Wiedergabe *läuft* und man sich innerhalb der letzten Sekunde des Schnitts befindet.
 
 ### Lautstärke und Blendzeit („Ausblenden an Schnittkante“)
 - **iOS ignoriert `audio.volume`** – Apple: „The volume property is not settable in

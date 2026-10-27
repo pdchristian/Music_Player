@@ -14,7 +14,7 @@
    (BeatClipMedia.appInfo) – die Konstanten dienen nur als Fallback (PWA, iOS ohne
    Plugin-Antwort) und sollten mit android/app/build.gradle bzw. ios/…/project.pbxproj
    mitlaufen. */
-let APP_VER = "1.3.6", APP_BUILD = 16;
+let APP_VER = "1.3.7", APP_BUILD = 17;
 
 /* ─────────────────────────── Utils ───────────────────────────────────── */
 const $  = s => document.querySelector(s);
@@ -1241,7 +1241,9 @@ async function nextTrack(manual){
   }
   // Restart am Schnittanfang nur bei manuellem Springen; automatisches Cut-Ende
   // soll immer zum naechsten Titel weitergehen (sonst Endlosschleife desselben Titels).
-  if (manual && s && s.end - audio.currentTime < 1){
+  // Laeuft die Wiedergabe nicht (z. B. am Schnitt-Ende angehalten), fuehrt >> dagegen
+  // zum naechsten Titel – sonst waere der erst nach dem zweiten Druck erreichbar.
+  if (manual && s && !audio.paused && s.end - audio.currentTime < 1){
     audio.currentTime = clamp(s.start, 0, audio.duration); armEndWatchdog();
     if (state.settings.fade > 0) fadeIn();
     return;
