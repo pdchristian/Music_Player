@@ -72,7 +72,7 @@ Mac-App **Transporter** zum Hochladen verwenden.
 
 **Version/Build** kommen aus `ios/App/App.xcodeproj` (`MARKETING_VERSION`,
 `CURRENT_PROJECT_VERSION`) und halten zu `app/app.js` (`APP_VER`/`APP_BUILD`) und
-`android/app/build.gradle` (aktuell **1.3.1**, Build **11**). App Store Connect weist einen
+`android/app/build.gradle` (aktuell **1.3.3**, Build **13**). App Store Connect weist einen
 Upload ab, wenn die Build-Nummer innerhalb derselben Version schon vergeben ist – dann
 `CURRENT_PROJECT_VERSION` erhöhen und neu archivieren. Beim ersten Upload fragt
 App Store Connect nach der **Export Compliance**; die App nutzt nur Standard-TLS, die
@@ -171,6 +171,15 @@ Auch Now-Playing-Seeking und die Headset-Tasten stoppen bzw. springen innerhalb 
 - Abschaltbar in den **Einstellungen → „Lautstärke über Web Audio (iOS)“** (Standard: Ein).
   Wegschalten wirkt erst nach einem **Neustart** der App, weil sich die Anbindung des
   Media-Elements an Web Audio nicht rückgängig machen lässt.
+- **Automatische Erkennung statt Plattformratens:** vor jedem Titelstart prüft
+  `probeVolumeSettable()`, ob `audio.volume` überhaupt einen Wert annimmt (iOS liest
+  danach immer 1). Ist das nicht der Fall, schaltet sich der Gain-Pfad ein – unabhängig
+  davon, welche Plattform die Brücke meldet. Zusätzlich gilt iOS über die Capacitor-Brücke
+  (`NATIVE_OS`) und über den User-Agent als erkannt.
+- **Sichtbarer Status** in den Einstellungen unter „Lautstärkebrücke“: *aktiv*,
+  *wartet auf Wiedergabe*, *nicht verfügbar* oder *ausgeschaltet*. Wenn der Pfad gewünscht,
+  aber nicht aktiv ist, meldet die App das einmalig per Toast („Lautstärkebrücke nicht
+  aktiv …“) – dann wirken Blendung und Regler nämlich nachweislich nicht.
 
 ---
 
@@ -189,12 +198,19 @@ Auch Now-Playing-Seeking und die Headset-Tasten stoppen bzw. springen innerhalb 
 
 ### Fehlerbehebung
 - **Lautstärke-Regler ohne Effekt / Blendung („Ausblenden an Schnittkante“) bleibt hart**:
-  iOS ignoriert `audio.volume`, geholfen wird über den Web-Audio-Gain-Pfad
-  (Abschnitt *Lautstärke und Blendzeit* oben). Prüfen: Einstellungen → „Lautstärke über
-  Web Audio (iOS)“ steht auf **Ein**, und die App wurde nach dem Umschalten **neu
-  gestartet**. Spielt die App bei gesperrtem Bildschirm gar nicht oder bricht sie dort hart
-  ab (iOS hat das Web-Audio-Rendering abgewählt), den Schalter auf **Aus** stellen und die
-  App neu starten – dann läuft wieder der reine `audio`-Pfad (ohne Blendung).
+  zuerst in den Einstellungen die Zeile **„Lautstärkebrücke“** ablesen.
+  - *aktiv* → die Brücke läuft; dann liegt es nicht an `audio.volume` (Fall melden).
+  - *wartet auf Wiedergabe* → einen Titel starten, die Brücke geht beim ersten Start an.
+  - *nicht verfügbar* → Web Audio ist in dieser WebView abgeschaltet; App neu starten.
+  - *ausgeschaltet* → Schalter „Lautstärke über Web Audio (iOS)“ auf **Ein** und App neu starten.
+  Beim ersten Titelstart erscheint zusätzlich ein Toast, falls die Brücke nicht hochkommt.
+- **Zeile „Lautstärke über Web Audio (iOS)“ fehlt komplett**: es läuft eine alte Build
+  (Version/Build in denselben Einstellungen vergleichen) – oder die App erkennt das Gerät
+  nicht als iOS. Dann zählt nur der Test, ob `audio.volume` wirkungslos ist; der wird vor
+  jedem Titelstart automatisch gemacht (`audio.volume setzbar: …` im Geräteprotokoll).
+- Spielt die App bei gesperrtem Bildschirm **gar nicht** oder bricht sie dort hart ab
+  (iOS hat das Web-Audio-Rendering abgewählt): Schalter auf **Aus** und App neu starten –
+  dann läuft wieder der reine `audio`-Pfad (ohne Blendung, aber ohne Hintergrundrisiko).
 - **„Unable to resolve module dependency: 'Capacitor' / 'BeatclipMedia'“** in
   `AppDelegate.swift` (Build schlägt fehl, `xcodebuild` läuft aber durch): das Projekt hatte
   keine Ziel-Abhängigkeit auf `Pods-App`, deshalb wurden die Pods nur über das Workspace gebaut.

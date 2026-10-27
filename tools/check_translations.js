@@ -38,6 +38,10 @@ function collectUsedKeys(){
      aufgeloest werden (EXPORT_FORMATS in app.js): */
   for (const m of js.matchAll(/desc:\s*"(export\.[a-z0-9_.]+)"/g))
     add(m[1], "app.js:" + lineOf(js, m.index));
+  /* Statustexte der Lautstaerke-Bruecke: waStateKey() liefert den Key, T() folgt
+     erst am Aufrufort in renderSet(). */
+  for (const m of js.matchAll(/"(set\.wa_state[a-z_]*)"/g))
+    add(m[1], "app.js:" + lineOf(js, m.index));
 
   const html = fs.readFileSync(INDEX_HTML, "utf8");
   for (const m of html.matchAll(/data-i18n(?:-title|-aria)?="([a-z0-9_.]+)"/g))

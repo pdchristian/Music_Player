@@ -14,7 +14,7 @@
    (BeatClipMedia.appInfo) – die Konstanten dienen nur als Fallback (PWA, iOS ohne
    Plugin-Antwort) und sollten mit android/app/build.gradle bzw. ios/…/project.pbxproj
    mitlaufen. */
-let APP_VER = "1.3.1", APP_BUILD = 11;
+let APP_VER = "1.3.3", APP_BUILD = 13;
 
 /* ─────────────────────────── Utils ───────────────────────────────────── */
 const $  = s => document.querySelector(s);
@@ -1095,7 +1095,12 @@ async function playQueue(plId, itemLocalId){
   await playItem(state.queue[idx < 0 ? 0 : idx], plId);
 }
 async function playItem(qItem, plId){
-  ensureWaRoute();   // iOS: Gain-Pfad spaetestens hier (nutzt die Antipp-Geste)
+  /* Vor jedem Start pruefen, ob audio.volume wirkungslos ist – dann ist die
+     Gain-Bruecke noetig, egal welche Plattform gemeldet wird. Abgewartet wird vor
+     audio.play(), damit die erste Rampe schon am GainNode ansetzt und nicht am
+     (von iOS ignorierten) audio.volume haengen bleibt. */
+  probeVolumeSettable();
+  await ensureWaRoute();
   const pl = playlist(plId) || state.playlists.find(p => p.items.some(i => i.id === qItem));
   if (!pl) return;
   const it = pl.items.find(i => i.id === qItem);
@@ -1141,6 +1146,16 @@ async function playItem(qItem, plId){
   updateMediaSession();
   nativeStartSession();
   if (state.settings.fade > 0) fadeIn(); else refreshMaster();
+  /* Selbstdiagnose: gewuenschter Gain-Pfad kam nicht hoch – dann sind Blendung und
+     Regler wirkungslos, also einmal sichtbar melden statt still zu scheitern. */
+  if (waRouteWanted() && !waOn){
+    setTimeout(() => {
+      if (waRouteWanted() && !waOn && state.player.playing && !waWarned){
+        waWarned = true; toast(T("toast.no_wa"), true);
+        if (state.screen === "set") renderSet();
+      }
+    }, 1200);
+  }
   renderMini(); refreshCurrent();
 }
 function armEndWatchdog(){
@@ -1238,22 +1253,61 @@ async function togglePlay(){
    Ende / keine Wiedergabe bei Sperrbildschirm): Regler in den Einstellungen auf "Aus"
    und App neu starten. */
 let waCtx = 0, waSrc = 0, waNode = 0, waOn = false, waPatch = false, waBase = 1;
-const waRouteWanted = () => NATIVE && NATIVE_OS === "iOS" && state.settings.waGain !== false;
+let waVolumeFixed = null, waWarned = false, waApiMissing = false;
+/* iOS-App (Capacitor-Bruecke) ODER iOS im Browser (User-Agent, kein Desktop-Mac). */
+const IS_IOS_UA = () => /iPhone|iPod|iPad/.test(navigator.userAgent) ||
+  (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
+const IS_IOS = () => NATIVE_OS === "iOS" || IS_IOS_UA();
+/* Der Gain-Pfad ist an, wenn iOS erwartet wird – oder wenn der Test unten ergibt,
+   dass sich audio.volume nicht setzen laesst. In den Einstellungen (waGain = Aus)
+   bleibt er aus, auch bei negativem Test. */
+const waRouteWanted = () => state.settings.waGain !== false &&
+  (IS_IOS() || waVolumeFixed === false);
+/* Laesst sich audio.volume ueberhaupt setzen? iOS antwortet trotz Zuweisung immer 1.
+   Das ist die zuverlaessigste Erkennung – unabhaengig von Bruecke und User-Agent. */
+function probeVolumeSettable(){
+  if (waVolumeFixed !== null || waOn) return waVolumeFixed;
+  try{
+    const d = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, "volume");
+    if (!d || !d.set) return false;
+    d.set.call(audio, 0.5);
+    const v = d.get.call(audio);
+    d.set.call(audio, clamp(state.settings.volume, 0, 1));
+    waVolumeFixed = Math.abs(v - 0.5) < 0.01;
+    console.log("audio.volume setzbar:", waVolumeFixed, "(gelesen " + v + ")");
+    return waVolumeFixed;
+  }catch(e){ return false; }
+}
+function waStateKey(){
+  if (waOn) return "set.wa_state_on";
+  if (state.settings.waGain === false) return "set.wa_state_off";
+  if (waApiMissing) return "set.wa_state_failed";
+  if (waVolumeFixed === true && !IS_IOS()) return "set.wa_state_native";
+  return waWarned ? "set.wa_state_failed" : "set.wa_state_pending";
+}
 /* Reihenfolge ist Absicht: erst den Kontext zum Laufen bringen, DANCH das Element
    anbinden. Ein MediaElementSource an einem suspendierten Kontext würde das Element
    stumm schalten, ohne dass man es zuruecknehmen koennte. */
 async function ensureWaRoute(){
-  if (waOn || !waRouteWanted()) return waOn;
+  if (waOn || waApiMissing || !waRouteWanted()) return waOn;
   try{
     const AC = window.AudioContext || window.webkitAudioContext;
-    if (!AC) return false;
+    if (!AC) { waApiMissing = true; return false; }
     if (!waCtx) waCtx = new AC();
     // Standard ist ctx.createMediaElementSource(el); aelteres WebKit kennt nur el.createMediaElementSource(ctx).
     const attach = waCtx.createMediaElementSource
       ? () => waCtx.createMediaElementSource(audio)
       : (audio.createMediaElementSource ? () => audio.createMediaElementSource(waCtx) : null);
-    if (!attach) return false;
-    if (waCtx.state !== "running") await waCtx.resume();
+    if (!attach) { waApiMissing = true; return false; }
+    if (waCtx.state !== "running"){
+      try{ await waCtx.resume(); }
+      catch(e){
+        // Safari wirft hier, wenn der Kontext auesserhalb einer Geste angelegt wurde –
+        // dann beim naechsten Antippen erneut versuchen (armWaGesture haengt daran).
+        console.warn("AudioContext-Start verschoben:", e && e.message);
+        return false;
+      }
+    }
     if (waCtx.state !== "running") return false;
     waNode = waCtx.createGain();
     waNode.gain.value = clamp(state.settings.volume, 0, 1) * rampGain;
@@ -1262,6 +1316,7 @@ async function ensureWaRoute(){
     waOn = true;
     patchVolumeForWa();
     waCtx.addEventListener("statechange", resumeWa);
+    console.log("Web-Audio-Gain aktiv (state " + waCtx.state + ")");
   }catch(e){ console.warn("Web-Audio-Gain nicht verfuegbar:", e); waOn = false; }
   return waOn;
 }
@@ -1286,7 +1341,7 @@ function patchVolumeForWa(){
   }catch(e){ console.warn("Lautstaerke-Zugriff nicht erweiterbar:", e); }
 }
 function armWaGesture(){
-  if (!waRouteWanted()) return;
+  if (!IS_IOS()) return;
   const kick = () => { ensureWaRoute(); resumeWa(); };
   ["touchend","pointerup","click","keydown"].forEach(t => document.addEventListener(t, kick, { passive:true }));
 }
@@ -1336,6 +1391,7 @@ function startFadeTo(){
   endRamp(rampIn); rampIn = null;
   fadeEndT = s.end;
   rampOut = newRamp(0, s.end - audio.currentTime);
+  console.log("Fade-Out: " + (s.end - audio.currentTime).toFixed(2) + "s, Pfad " + (waOn ? "WebAudio" : "audio.volume"));
 }
 function stopFadeOut(restore){
   endRamp(rampOut); rampOut = null; fadeEndT = -1;
@@ -1895,9 +1951,10 @@ function renderSet(){
     '<div class="kv"><span class="k">' + T("set.fade") + '</span><span class="v">' + s.fade.toFixed(1) + ' s ' +
     '<button class="btn small" data-act="fade-down" style="margin-left:8px" title="' + T("set.fade_down") + '" aria-label="' + T("set.fade_down") + '">▼</button>' +
     '<button class="btn small" data-act="fade-up" style="margin-left:4px" title="' + T("set.fade_up") + '" aria-label="' + T("set.fade_up") + '">▲</button></span></div>' +
-    (NATIVE_OS === "iOS" ?
+    (IS_IOS() ?
     '<div class="sep"></div>' +
     '<div class="kv"><span class="k">' + T("set.wa_gain") + '</span><div class="toggle ' + (s.waGain !== false?"on":"") + '" data-act="tgl" data-k="waGain"></div></div>' +
+    '<div class="kv"><span class="k">' + T("set.wa_state") + '</span><span class="v">' + T(waStateKey()) + '</span></div>' +
     '<div class="infoBlock">' + T("set.wa_gain_hint") + '</div>' : "") +
     '<div class="sep"></div>' +
     '<div class="kv"><span class="k">' + T("set.sleep") + '</span><span class="v">' +
